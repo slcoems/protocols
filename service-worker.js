@@ -1,5 +1,5 @@
-const SHELL_CACHE = "slco-protocols-shell-v1";
-const RUNTIME_CACHE = "slco-protocols-runtime-v1";
+const SHELL_CACHE = "slco-protocols-shell-v2";
+const RUNTIME_CACHE = "slco-protocols-runtime-v2";
 
 // Everything needed for the app shell + navigation data + pdf.js to work
 // offline. PDFs are cached lazily on first view (and eagerly via the

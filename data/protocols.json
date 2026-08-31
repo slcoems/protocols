@@ -1,12 +1,7 @@
 {
-  "generatedAt": "2026-07-20T18:37:54Z",
-  "sourceCheckedAt": "2026-07-20T18:37:20Z",
+  "generatedAt": "2026-08-31T14:09:51Z",
+  "sourceCheckedAt": "2026-08-31T14:09:45Z",
   "documents": {
-    "main-protocols": {
-      "id": "main-protocols",
-      "title": "Salt Lake County EMS Protocols",
-      "file": "main-protocols.pdf"
-    },
     "district-bylaws": {
       "id": "district-bylaws",
       "title": "District ByLaws",
@@ -61,6 +56,11 @@
       "id": "sexual-assault-abuse",
       "title": "Sexual Assault / Abuse",
       "file": "Sexual-Assault-Abuse.pdf"
+    },
+    "main-protocols": {
+      "id": "main-protocols",
+      "title": "Salt Lake County EMS Protocols",
+      "file": "main-protocols.pdf"
     }
   },
   "clinicalCategories": [
