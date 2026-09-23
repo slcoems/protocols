@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-08-31T14:09:51Z",
-  "sourceCheckedAt": "2026-08-31T14:09:45Z",
+  "generatedAt": "2026-09-23T01:23:30Z",
+  "sourceCheckedAt": "2026-09-23T01:23:22Z",
   "documents": {
     "district-bylaws": {
       "id": "district-bylaws",
@@ -231,8 +231,8 @@
           "page": 59
         },
         {
-          "id": "medical-patient-care-guidelines-opioid-overdose",
-          "title": "Opioid Overdose",
+          "id": "medical-patient-care-guidelines-opioid-tricyclic-overdose",
+          "title": "OPIOID/TRICYCLIC Overdose",
           "docId": "main-protocols",
           "page": 62
         },
