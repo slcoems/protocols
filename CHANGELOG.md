@@ -12,3 +12,7 @@
   - 9/1/2026 - Airway Management: Added MANUAL FOREIGN BODY REMOVAL
   - 9/1/2026 - Opioid Overdose: Changed title to OPIOID/TRICYCLIC OVERDOSE
 
+## 2026-09-28
+
+- Added procedure video: Needle Thoracostomy (Home → Procedure Videos; linked from General Trauma Management)
+- Fixed: Download All copies were lost whenever the app updated

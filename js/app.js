@@ -2,6 +2,11 @@ import * as pdfjsLib from "./pdfjs/pdf.min.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "./js/pdfjs/pdf.worker.min.mjs";
 
+// Procedure videos live in their own cache, outside the service worker's
+// versioned ones, so a protocol update doesn't throw away a 12 MB download.
+// Video files are versioned by name; stale ones are pruned on load.
+const VIDEO_CACHE = "slco-protocols-videos";
+
 const STORAGE_KEYS = {
   favorites: "slco-protocols:favorites",
   theme: "slco-protocols:theme",
@@ -11,6 +16,8 @@ const STORAGE_KEYS = {
 const state = {
   protocols: null,
   searchIndex: null,
+  videos: [],
+  savedVideos: new Set(), // ids saved for offline
   view: "home",
   query: "",
   favorites: loadFavorites(),
@@ -48,6 +55,15 @@ const el = {
   offlineToast: document.getElementById("offlineToast"),
   updateToast: document.getElementById("updateToast"),
   updateReload: document.getElementById("updateReload"),
+  viewerVideoBar: document.getElementById("viewerVideoBar"),
+  viewerVideoLabel: document.getElementById("viewerVideoLabel"),
+  player: document.getElementById("player"),
+  playerClose: document.getElementById("playerClose"),
+  playerTitle: document.getElementById("playerTitle"),
+  playerProtocol: document.getElementById("playerProtocol"),
+  playerVideo: document.getElementById("playerVideo"),
+  playerOffline: document.getElementById("playerOffline"),
+  playerSave: document.getElementById("playerSave"),
 };
 
 const CATEGORY_ICONS = {
@@ -85,6 +101,25 @@ async function loadData() {
   ]);
   state.protocols = await protocolsRes.json();
   state.searchIndex = await searchRes.json();
+  // Videos need the player markup; if this page is an older index.html,
+  // leave them out rather than break the app.
+  try {
+    state.videos = el.player ? (await (await fetch("data/videos.json")).json()).videos || [] : [];
+  } catch {
+    state.videos = [];
+  }
+  await refreshSavedVideos();
+}
+
+async function refreshSavedVideos() {
+  if (!("caches" in window)) return;
+  const cache = await caches.open(VIDEO_CACHE);
+  const saved = new Set();
+  for (const v of state.videos) if (await cache.match(v.file)) saved.add(v.id);
+  state.savedVideos = saved;
+  // Drop files from older versions of a video (or videos no longer listed).
+  const keep = new Set(state.videos.flatMap((v) => [v.file, v.poster]).map((f) => new URL(f, location.href).href));
+  for (const req of await cache.keys()) if (!keep.has(req.url)) await cache.delete(req);
 }
 
 function findEntryByKey(key) {
@@ -155,6 +190,20 @@ function rowHTML(entry, opts = {}) {
     </button>`;
 }
 
+function formatDuration(sec) {
+  return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+}
+
+function videoRowHTML(v) {
+  const saved = state.savedVideos.has(v.id) ? " · Saved offline" : "";
+  return `
+    <button class="row-btn" data-video="${escapeAttr(v.id)}">
+      <span class="category-icon"><svg class="play-icon" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+      <span class="row-title">${escapeHtml(v.title)}<div class="row-sub">${formatDuration(v.durationSec)} · ${escapeHtml(v.scope)}${saved}</div></span>
+      <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    </button>`;
+}
+
 function favStarHTML() {
   return `<span class="row-fav-star"><svg viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="currentColor"/></svg></span>`;
 }
@@ -178,6 +227,12 @@ function renderHome() {
       <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`).join("");
   html += `</div>`;
+
+  if (state.videos.length) {
+    html += `<div class="section-title">Procedure Videos</div><div class="card-list">`;
+    html += state.videos.map((v) => videoRowHTML(v)).join("");
+    html += `</div>`;
+  }
 
   html += `<div class="section-title">Reference</div><div class="card-list">`;
   html += p.reference.map((r) => rowHTML(r, { icon: "📄" })).join("");
@@ -248,7 +303,7 @@ function renderSettings() {
       <div class="settings-row">
         <span>
           <div class="settings-label">Download all protocols</div>
-          <div class="settings-sub">Caches every PDF for use with no signal</div>
+          <div class="settings-sub">Caches every PDF${state.videos.length ? " and procedure video" : ""} for use with no signal</div>
         </span>
         <button class="icon-btn" id="downloadAllBtn" style="width:auto;height:auto;color:var(--accent);font-weight:700;font-size:14px;padding:6px 10px;">Download</button>
       </div>
@@ -304,13 +359,19 @@ function renderSearchResults() {
     textMatches.push(page);
   }
 
-  const total = titleMatches.length + textMatches.length;
+  const videoMatches = state.videos.filter((v) => {
+    const hay = [v.title, v.summary, ...(v.keywords || [])].join(" ").toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+
+  const total = videoMatches.length + titleMatches.length + textMatches.length;
   if (!total) {
     el.app.innerHTML = `<div class="empty-state">No results for "${escapeHtml(state.query)}"</div>`;
     return;
   }
 
   let html = `<div class="card-list">`;
+  html += videoMatches.map((v) => videoRowHTML(v)).join("");
   html += titleMatches.map((entry) => rowHTML(entry)).join("");
   html += textMatches.slice(0, 40).map((page) => {
     const entry = navByKey.get(`${page.docId}#${page.page}`) || {
@@ -383,6 +444,11 @@ el.app.addEventListener("click", (e) => {
   const navBtn = e.target.closest("[data-nav='category']");
   if (navBtn) {
     applyNav({ type: "category", catId: navBtn.dataset.cat });
+    return;
+  }
+  const videoBtn = e.target.closest(".row-btn[data-video]");
+  if (videoBtn) {
+    openPlayer(videoBtn.dataset.video);
     return;
   }
   const rowBtn = e.target.closest(".row-btn[data-doc]");
@@ -475,6 +541,7 @@ async function renderPage() {
     el.pageIndicator.textContent = `${pageNum} / ${doc.numPages}`;
     el.zoomIndicator.textContent = `${Math.round(state.viewer.zoom * 100)}%`;
     updateFavButton();
+    updateVideoBar();
   } finally {
     state.viewer.rendering = false;
   }
@@ -542,6 +609,92 @@ el.zoomOut.addEventListener("click", () => {
   });
 })();
 
+// ---------- Procedure videos ----------
+
+// A protocol page links to a video when its text mentions the procedure, so
+// the link survives the county renumbering pages in a new PDF.
+function videoForPage(docId, page) {
+  const entry = state.searchIndex?.find((p) => p.docId === docId && p.page === page);
+  if (!entry) return null;
+  const text = entry.text.toLowerCase();
+  return state.videos.find((v) => (v.pageText || []).some((t) => text.includes(t))) || null;
+}
+
+function updateVideoBar() {
+  if (!el.viewerVideoBar) return;
+  const v = videoForPage(state.viewer.docId, state.viewer.page);
+  el.viewerVideoBar.hidden = !v;
+  if (!v) return;
+  el.viewerVideoLabel.textContent = `Watch: ${v.title} (${formatDuration(v.durationSec)})`;
+  el.viewerVideoBar.onclick = () => openPlayer(v.id);
+}
+
+function protocolEntryFor(v) {
+  const byId = allNavEntries().find((e) => e.id === v.protocolId);
+  if (byId) return byId;
+  const page = state.searchIndex?.find((p) => (v.pageText || []).some((t) => p.text.toLowerCase().includes(t)));
+  return page ? { docId: page.docId, page: page.page, title: docTitle(page.docId) } : null;
+}
+
+function openPlayer(id) {
+  const v = state.videos.find((x) => x.id === id);
+  if (!v) return;
+  const video = el.playerVideo;
+  el.playerTitle.textContent = v.title;
+  video.poster = v.poster;
+  video.src = v.file;
+  el.player.hidden = false;
+  el.player.dataset.video = v.id;
+  const entry = protocolEntryFor(v);
+  el.playerProtocol.hidden = !entry || !el.viewer.hidden;
+  el.playerProtocol.onclick = () => {
+    closePlayer();
+    if (entry) openViewer(entry.docId, entry.page, entry.title);
+  };
+  el.playerSave.onclick = () => saveVideo(v);
+  updatePlayerOffline(v);
+  video.play().catch(() => {}); // autoplay may be blocked; the controls are there
+}
+
+function updatePlayerOffline(v, message) {
+  const saved = state.savedVideos.has(v.id);
+  el.playerOffline.textContent = message || (saved ? "Saved on this device" : `Not saved offline (${Math.round(v.bytes / 1e6)} MB)`);
+  el.playerSave.hidden = saved;
+}
+
+async function saveVideo(v) {
+  updatePlayerOffline(v, "Saving…");
+  el.playerSave.hidden = true;
+  try {
+    const cache = await caches.open(VIDEO_CACHE);
+    await cache.addAll([v.file, v.poster]);
+    state.savedVideos.add(v.id);
+    updatePlayerOffline(v);
+  } catch (err) {
+    console.warn("Failed to save video", err);
+    updatePlayerOffline(v, "Couldn't save. Check your connection.");
+    el.playerSave.hidden = false;
+  }
+}
+
+function closePlayer() {
+  const video = el.playerVideo;
+  video.pause();
+  video.removeAttribute("src");
+  video.load(); // stop any download in progress
+  el.player.hidden = true;
+  if (el.viewer.hidden) render();
+}
+
+el.playerClose?.addEventListener("click", closePlayer);
+el.playerVideo?.addEventListener("error", () => {
+  if (!el.playerVideo.getAttribute("src")) return;
+  const v = state.videos.find((x) => x.id === el.player.dataset.video);
+  if (v && !navigator.onLine && !state.savedVideos.has(v.id)) {
+    updatePlayerOffline(v, "Not saved on this device. Save it next time you have signal.");
+  }
+});
+
 // ---------- Theme / text size ----------
 
 function setTheme(val) {
@@ -598,9 +751,24 @@ async function downloadAllForOffline() {
     if (saved === files.length) break;
     await new Promise((r) => setTimeout(r, 300));
   }
-  statusEl.textContent = saved === files.length
+  let videoNote = "";
+  if (state.videos.length) {
+    statusEl.textContent = "Downloading procedure videos…";
+    const cache = await caches.open(VIDEO_CACHE);
+    for (const v of state.videos) {
+      try {
+        if (!(await cache.match(v.file))) await cache.addAll([v.file, v.poster]);
+        state.savedVideos.add(v.id);
+      } catch (err) {
+        console.warn("Failed to save video", v.file, err);
+      }
+    }
+    const n = state.videos.filter((v) => state.savedVideos.has(v.id)).length;
+    videoNote = ` ${n} of ${state.videos.length} video${state.videos.length === 1 ? "" : "s"} saved.`;
+  }
+  statusEl.textContent = (saved === files.length
     ? `All ${files.length} documents available offline.`
-    : `${saved} of ${files.length} documents saved. Check your connection and try again.`;
+    : `${saved} of ${files.length} documents saved. Check your connection and try again.`) + videoNote;
 }
 
 window.addEventListener("resize", () => {

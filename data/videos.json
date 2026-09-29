@@ -1,0 +1,17 @@
+{
+  "videos": [
+    {
+      "id": "needle-thoracostomy",
+      "title": "Needle Thoracostomy",
+      "summary": "When to decompress, finding the site, insertion, and reassessment",
+      "scope": "AEMT / Paramedic",
+      "file": "videos/needle-thoracostomy-v5.mp4",
+      "poster": "videos/needle-thoracostomy-v5.jpg",
+      "durationSec": 161,
+      "bytes": 12036480,
+      "protocolId": "trauma-patient-care-guidelines-general-trauma-management",
+      "pageText": ["needle thoracostomy", "needle decompression"],
+      "keywords": ["needle decompression", "chest decompression", "tension pneumothorax", "pneumothorax", "thoracostomy"]
+    }
+  ]
+}

@@ -49,6 +49,10 @@
     <span id="pageIndicator">1 / 1</span>
     <button class="icon-btn small" id="nextPage" aria-label="Next page">&rsaquo;</button>
   </div>
+  <button class="viewer-video-bar" id="viewerVideoBar" hidden>
+    <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+    <span id="viewerVideoLabel"></span>
+  </button>
   <div class="viewer-canvas-wrap" id="viewerCanvasWrap">
     <canvas id="pdfCanvas"></canvas>
   </div>
@@ -56,6 +60,23 @@
     <button class="icon-btn small" id="zoomOut" aria-label="Zoom out">&minus;</button>
     <span id="zoomIndicator">100%</span>
     <button class="icon-btn small" id="zoomIn" aria-label="Zoom in">+</button>
+  </div>
+</div>
+
+<div class="player" id="player" hidden>
+  <div class="viewer-toolbar">
+    <button class="icon-btn" id="playerClose" aria-label="Close video">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    </button>
+    <span class="viewer-title" id="playerTitle"></span>
+    <button class="player-link" id="playerProtocol">Protocol</button>
+  </div>
+  <div class="player-stage">
+    <video id="playerVideo" controls playsinline preload="metadata"></video>
+  </div>
+  <div class="player-footer">
+    <span class="player-offline" id="playerOffline"></span>
+    <button class="player-link" id="playerSave">Save for offline</button>
   </div>
 </div>
 

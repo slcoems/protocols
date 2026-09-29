@@ -352,6 +352,75 @@ mark {
   color: var(--text-dim);
 }
 
+/* Link from a protocol page to its procedure video */
+.viewer-video-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 9px 12px;
+}
+.viewer-video-bar[hidden] { display: none; }
+.viewer-video-bar svg { width: 18px; height: 18px; flex-shrink: 0; }
+.viewer-video-bar:active { background: var(--surface-2); }
+.play-icon { width: 20px; height: 20px; }
+
+/* Procedure video player */
+.player {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+.player[hidden] { display: none; }
+.player .viewer-toolbar { flex-shrink: 0; }
+.player-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.player-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.player-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px calc(var(--safe-bottom) + 10px);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.player-link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.player-link[hidden] { display: none; }
+.player-link:active { background: var(--surface-2); }
+
 /* Toasts */
 .offline-toast, .update-toast {
   position: fixed;
