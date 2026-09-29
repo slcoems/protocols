@@ -564,30 +564,43 @@ function applyTextSize() {
 
 // ---------- Offline download ----------
 
+// PDFs are fetched through the service worker, which stores them in its own
+// versioned runtime cache. Writing to a cache from here instead would use a
+// name the service worker doesn't know about, and it deletes unknown caches
+// every time it updates.
 async function downloadAllForOffline() {
   const statusEl = document.getElementById("downloadStatus");
   const barEl = document.getElementById("downloadProgressBar");
   const fillEl = document.getElementById("downloadProgressFill");
+  if (!navigator.serviceWorker?.controller) {
+    statusEl.textContent = "Offline storage isn't ready yet. Reload the app, then try again.";
+    return;
+  }
   const files = Object.values(state.protocols.documents).map((d) => `pdfs/${d.file}`);
   barEl.hidden = false;
   let done = 0;
   statusEl.textContent = `Downloading ${done}/${files.length}…`;
-  const cache = await caches.open(RUNTIME_CACHE_NAME());
   for (const f of files) {
     try {
-      await cache.add(f);
+      const res = await fetch(f);
+      await res.arrayBuffer();
     } catch (err) {
-      console.warn("Failed to cache", f, err);
+      console.warn("Failed to download", f, err);
     }
     done += 1;
     fillEl.style.width = `${Math.round((done / files.length) * 100)}%`;
     statusEl.textContent = `Downloading ${done}/${files.length}…`;
   }
-  statusEl.textContent = `All ${files.length} documents available offline.`;
-}
-
-function RUNTIME_CACHE_NAME() {
-  return "slco-protocols-runtime";
+  // The service worker finishes writing each file just after handing it back.
+  let saved = 0;
+  for (let tries = 0; tries < 10; tries++) {
+    saved = (await Promise.all(files.map((f) => caches.match(f)))).filter(Boolean).length;
+    if (saved === files.length) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  statusEl.textContent = saved === files.length
+    ? `All ${files.length} documents available offline.`
+    : `${saved} of ${files.length} documents saved. Check your connection and try again.`;
 }
 
 window.addEventListener("resize", () => {
