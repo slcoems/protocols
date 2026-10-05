@@ -16,3 +16,7 @@
 
 - Added procedure video: Needle Thoracostomy (Home → Procedure Videos; linked from General Trauma Management)
 - Fixed: Download All copies were lost whenever the app updated
+
+## 2026-10-05
+
+- Added procedure video: Pelvic Binder (Home → Procedure Videos; linked from General Trauma Management and the hemorrhagic shock / traumatic arrest page)

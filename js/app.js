@@ -56,7 +56,6 @@ const el = {
   updateToast: document.getElementById("updateToast"),
   updateReload: document.getElementById("updateReload"),
   viewerVideoBar: document.getElementById("viewerVideoBar"),
-  viewerVideoLabel: document.getElementById("viewerVideoLabel"),
   player: document.getElementById("player"),
   playerClose: document.getElementById("playerClose"),
   playerTitle: document.getElementById("playerTitle"),
@@ -612,21 +611,29 @@ el.zoomOut.addEventListener("click", () => {
 // ---------- Procedure videos ----------
 
 // A protocol page links to a video when its text mentions the procedure, so
-// the link survives the county renumbering pages in a new PDF.
-function videoForPage(docId, page) {
+// the link survives the county renumbering pages in a new PDF. One page can
+// mention several procedures (General Trauma Management covers both needle
+// thoracostomy and pelvic binders), so it gets a link for each.
+function videosForPage(docId, page) {
   const entry = state.searchIndex?.find((p) => p.docId === docId && p.page === page);
-  if (!entry) return null;
+  if (!entry) return [];
   const text = entry.text.toLowerCase();
-  return state.videos.find((v) => (v.pageText || []).some((t) => text.includes(t))) || null;
+  return state.videos.filter((v) => (v.pageText || []).some((t) => text.includes(t)));
 }
 
 function updateVideoBar() {
   if (!el.viewerVideoBar) return;
-  const v = videoForPage(state.viewer.docId, state.viewer.page);
-  el.viewerVideoBar.hidden = !v;
-  if (!v) return;
-  el.viewerVideoLabel.textContent = `Watch: ${v.title} (${formatDuration(v.durationSec)})`;
-  el.viewerVideoBar.onclick = () => openPlayer(v.id);
+  const vs = videosForPage(state.viewer.docId, state.viewer.page);
+  el.viewerVideoBar.hidden = !vs.length;
+  el.viewerVideoBar.innerHTML = vs
+    .map(
+      (v) => `<button class="viewer-video-link" data-video="${escapeAttr(v.id)}">
+        <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+        <span>Watch: ${escapeHtml(v.title)} (${formatDuration(v.durationSec)})</span>
+      </button>`
+    )
+    .join("");
+  el.viewerVideoBar.querySelectorAll("button").forEach((b) => (b.onclick = () => openPlayer(b.dataset.video)));
 }
 
 function protocolEntryFor(v) {

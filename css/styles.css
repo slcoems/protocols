@@ -355,21 +355,31 @@ mark {
 /* Link from a protocol page to its procedure video */
 .viewer-video-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 0 14px;
   width: 100%;
-  border: none;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 700;
-  padding: 9px 12px;
+  padding: 3px 8px;
 }
 .viewer-video-bar[hidden] { display: none; }
-.viewer-video-bar svg { width: 18px; height: 18px; flex-shrink: 0; }
-.viewer-video-bar:active { background: var(--surface-2); }
+.viewer-video-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 6px 6px;
+}
+.viewer-video-link svg { width: 18px; height: 18px; flex-shrink: 0; }
+.viewer-video-link:active { background: var(--surface-2); }
 .play-icon { width: 20px; height: 20px; }
 
 /* Procedure video player */
