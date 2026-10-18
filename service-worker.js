@@ -1,4 +1,4 @@
-const SHELL_CACHE = "slco-protocols-shell-v5";
+const SHELL_CACHE = "slco-protocols-shell-v6";
 const RUNTIME_CACHE = "slco-protocols-runtime-v3";
 // Procedure videos are only stored when the user saves them (player or
 // Settings > Download All). Unversioned so protocol updates don't discard a
