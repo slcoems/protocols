@@ -25,6 +25,19 @@
       "protocolId": "trauma-patient-care-guidelines-general-trauma-management",
       "pageText": ["pelvic binder"],
       "keywords": ["pelvic binder", "pelvic sling", "pelvic fracture", "unstable pelvis", "open book", "SAM sling", "trochanters"]
+    },
+    {
+      "id": "splinting",
+      "title": "Splinting",
+      "summary": "Checking the limb, splint as found vs. gentle traction, joints above and below, and reassessment",
+      "scope": "All providers",
+      "file": "videos/splinting-v1.mp4",
+      "poster": "videos/splinting-v1.jpg",
+      "durationSec": 121,
+      "bytes": 10457320,
+      "protocolId": "trauma-patient-care-guidelines-ent-dental-fractures-crush-injuries",
+      "pageText": ["fractures/dislocations", "splint in current position"],
+      "keywords": ["splint", "splinting", "fracture", "dislocation", "forearm", "sling", "swathe", "SAM splint", "immobilize", "traction"]
     }
   ]
 }

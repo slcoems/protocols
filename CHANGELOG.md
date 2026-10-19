@@ -24,3 +24,7 @@
 ## 2026-10-18
 
 - Updated procedure video: Pelvic Binder now shows the pelvic ring opening and the binder closing it in 3D (pelvis model: Weissbrod, Jones, Mateo (USU/HJF), NIH 3D 3DPX-015682, CC BY-NC-SA 4.0)
+
+## 2026-10-19
+
+- Added procedure video: Splinting (Home → Procedure Videos; linked from ENT / Dental / Fractures / Crush Injuries)
