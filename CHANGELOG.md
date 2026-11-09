@@ -28,3 +28,7 @@
 ## 2026-10-19
 
 - Added procedure video: Splinting (Home → Procedure Videos; linked from ENT / Dental / Fractures / Crush Injuries)
+
+## 2026-11-09
+
+- Added procedure video: Tourniquet (Home → Procedure Videos; linked from General Trauma Management and the hemorrhagic shock / traumatic arrest page). 3D bones: BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution-Share Alike 2.1 Japan; this video is shared under the same license

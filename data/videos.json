@@ -38,6 +38,19 @@
       "protocolId": "trauma-patient-care-guidelines-ent-dental-fractures-crush-injuries",
       "pageText": ["fractures/dislocations", "splint in current position"],
       "keywords": ["splint", "splinting", "fracture", "dislocation", "forearm", "sling", "swathe", "SAM splint", "immobilize", "traction"]
+    },
+    {
+      "id": "tourniquet",
+      "title": "Tourniquet",
+      "summary": "When to use one, placing it above the wound, tightening, adding a second, and reassessment",
+      "scope": "All providers",
+      "file": "videos/tourniquet-v8.mp4",
+      "poster": "videos/tourniquet-v8.jpg",
+      "durationSec": 118,
+      "bytes": 10799077,
+      "protocolId": "trauma-patient-care-guidelines-general-trauma-management",
+      "pageText": ["place tourniquet", "commercial tourniquets", "via tourniquets"],
+      "keywords": ["tourniquet", "TQ", "C-A-T", "CAT tourniquet", "windlass", "hemorrhage", "hemorrhage control", "severe bleeding", "stop the bleed", "amputation", "tourniquet conversion"]
     }
   ]
 }
