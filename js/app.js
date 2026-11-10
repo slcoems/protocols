@@ -48,6 +48,8 @@ const state = {
     page: 1,
     numPages: 1,
     zoom: loadZoom(), // multiplier on top of the content-fit baseline (1 = fit)
+    find: null, // { raw, groups }: a search term to highlight on the page, when opened from search
+    matchIndex: 0,
     rendering: false,
   },
 };
@@ -69,6 +71,12 @@ const el = {
   viewerStatus: document.getElementById("viewerStatus"),
   pdfCanvas: document.getElementById("pdfCanvas"),
   pdfText: document.getElementById("pdfText"),
+  pdfSheet: document.getElementById("pdfSheet"),
+  pdfHighlights: document.getElementById("pdfHighlights"),
+  viewerFind: document.getElementById("viewerFind"),
+  findText: document.getElementById("findText"),
+  findNext: document.getElementById("findNext"),
+  findClear: document.getElementById("findClear"),
   canvasWrap: document.getElementById("viewerCanvasWrap"),
   prevPage: document.getElementById("prevPage"),
   nextPage: document.getElementById("nextPage"),
@@ -803,7 +811,8 @@ el.app.addEventListener("click", (e) => {
   }
   const rowBtn = e.target.closest(".row-btn[data-doc]");
   if (rowBtn) {
-    openViewer(rowBtn.dataset.doc, Number(rowBtn.dataset.page), rowBtn.dataset.title, rowBtn);
+    const query = state.query.trim();
+    openViewer(rowBtn.dataset.doc, Number(rowBtn.dataset.page), rowBtn.dataset.title, rowBtn, query.length >= 2 ? query : null);
   }
 });
 
@@ -936,6 +945,127 @@ async function contentRange(docId, page, pageNum) {
   return range;
 }
 
+// ---------- Highlighting a search term on the page ----------
+
+// The canvas is a picture, so where a word sits comes from pdf.js's text layer
+// data: each run of text with its position, width and font. A match inside a
+// run is placed by measuring the text before it and the match itself, then
+// scaling to the run's real width.
+const textContentCache = new Map();
+const measureCtx = document.createElement("canvas").getContext("2d");
+
+async function pageContent(docId, pageNum, page) {
+  const key = `${docId}#${pageNum}`;
+  if (!textContentCache.has(key)) textContentCache.set(key, await page.getTextContent());
+  return textContentCache.get(key);
+}
+
+// Same word-start rule as the search itself; matches grow to the end of the word.
+function highlightRegex(groups) {
+  const alts = groups.flatMap((g) => g.alts).map(escapeRegex).join("|");
+  return new RegExp(`(^|[^a-z0-9])(${alts})`, "g");
+}
+
+function matchRanges(lower, re) {
+  const out = [];
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(lower))) {
+    const start = m.index + m[1].length;
+    let end = start + m[2].length;
+    while (end < lower.length && /[a-z0-9]/.test(lower[end])) end++;
+    out.push([start, end]);
+  }
+  return out;
+}
+
+// Boxes in the page sheet's own CSS pixels.
+function highlightRects(content, viewport, re) {
+  const rects = [];
+  for (const item of content.items) {
+    if (!item.str || !item.width || !item.str.trim()) continue;
+    const ranges = matchRanges(item.str.toLowerCase(), re);
+    if (!ranges.length) continue;
+    const t = pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const size = Math.hypot(t[2], t[3]);
+    if (!size || Math.abs(t[1]) > size * 0.01) continue; // rotated text: leave it unmarked
+    const style = content.styles[item.fontName] || {};
+    measureCtx.font = `${size}px ${style.fontFamily || "sans-serif"}`;
+    const whole = measureCtx.measureText(item.str).width || 1;
+    const k = (item.width * viewport.scale) / whole; // the run's real width over the measured width
+    const ascent = style.ascent ?? 0.9;
+    const descent = style.descent ?? -0.22;
+    for (const [s, e] of ranges) {
+      const before = measureCtx.measureText(item.str.slice(0, s)).width * k;
+      const word = measureCtx.measureText(item.str.slice(s, e)).width * k;
+      const pad = 1.5;
+      rects.push({ x: t[4] + before - pad, y: t[5] - ascent * size - 1, w: word + pad * 2, h: (ascent - descent) * size + 2 });
+    }
+  }
+  return rects.sort((a, b) => a.y - b.y || a.x - b.x); // reading order, so Next goes down the page
+}
+
+async function updateHighlights(docId, pageNum, page, { cssScale, crop, pageWidth }, mode) {
+  const v = state.viewer;
+  if (!v.find) {
+    el.pdfHighlights.replaceChildren();
+    updateFindBar(0);
+    return;
+  }
+  const content = await pageContent(docId, pageNum, page);
+  const viewport = page.getViewport({ scale: cssScale, offsetX: -crop.x0 * pageWidth * cssScale });
+  const rects = highlightRects(content, viewport, highlightRegex(v.find.groups));
+  el.pdfHighlights.replaceChildren(...rects.map((r) => {
+    const box = document.createElement("div");
+    box.className = "pdf-hl";
+    box.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;
+    return box;
+  }));
+  updateFindBar(rects.length);
+  // A new page or a new document brings the first match into view; zooming keeps the reader's place.
+  if (mode !== "zoom") v.matchIndex = 0;
+  if (rects.length) focusMatch(Math.min(v.matchIndex, rects.length - 1), mode !== "zoom");
+}
+
+function focusMatch(index, scroll = true) {
+  const boxes = [...el.pdfHighlights.children];
+  if (!boxes.length) return;
+  const i = ((index % boxes.length) + boxes.length) % boxes.length;
+  state.viewer.matchIndex = i;
+  boxes.forEach((b, k) => b.classList.toggle("current", k === i));
+  if (!scroll) return;
+  const wrap = el.canvasWrap;
+  const w = wrap.getBoundingClientRect();
+  const r = boxes[i].getBoundingClientRect();
+  wrap.scrollTop += r.top - w.top - wrap.clientHeight / 3; // a third of the way down, with context above it
+  if (r.left < w.left + 12 || r.right > w.right - 12) wrap.scrollLeft += r.left - w.left - 24;
+}
+
+function updateFindBar(count) {
+  const find = state.viewer.find;
+  el.viewerFind.hidden = !find;
+  if (!find) return;
+  // The query gives way (with an ellipsis) before the count does.
+  const term = document.createElement("span");
+  term.className = "find-term";
+  const mark = document.createElement("mark");
+  mark.textContent = find.raw;
+  term.append("“", mark, "”");
+  const tally = document.createElement("span");
+  tally.className = "find-tally";
+  tally.textContent = count === 0 ? " · none on this page" : ` · ${count} ${count === 1 ? "match" : "matches"}`;
+  el.findText.replaceChildren(term, tally);
+  el.findNext.hidden = count < 2;
+}
+
+el.findNext.addEventListener("click", () => focusMatch(state.viewer.matchIndex + 1));
+el.findClear.addEventListener("click", () => {
+  state.viewer.find = null;
+  el.pdfHighlights.replaceChildren();
+  updateFindBar(0);
+  announce("Highlights cleared");
+});
+
 function setViewerStatus(message, retry) {
   el.viewerStatus.replaceChildren();
   el.viewerStatus.hidden = !message;
@@ -961,13 +1091,16 @@ function showViewerError(err) {
   );
 }
 
-async function openViewer(docId, page, title, trigger) {
+async function openViewer(docId, page, title, trigger, query) {
   const v = state.viewer;
   v.docId = docId;
   v.page = page || 1;
   v.openPage = v.page;
   v.openTitle = title || docTitle(docId);
   v.zoom = loadZoom(); // the zoom the reader last chose, not a reset
+  // Opened from a search: mark the term on the page. Opened any other way: nothing to mark.
+  v.find = query ? { raw: query, groups: parseQuery(query) } : null;
+  v.matchIndex = 0;
   el.viewerTitle.textContent = v.openTitle;
   el.pageIndicator.textContent = "…";
   el.pdfText.textContent = "";
@@ -1064,6 +1197,7 @@ async function renderPage(mode = "page") {
     canvas.style.height = `${cssScale * unscaled.height}px`;
     restoreScroll(mode, anchor);
     await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+    await updateHighlights(v.docId, pageNum, page, { cssScale, crop, pageWidth: unscaled.width }, mode);
 
     setViewerStatus("");
     el.viewerTitle.textContent = pageNum === v.openPage ? v.openTitle : contextForPage(v.docId, pageNum).title;

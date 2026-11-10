@@ -23,6 +23,7 @@
   --toast-text: #ffffff;
   --mark-bg: #fde68a;
   --mark-text: #101728;
+  --match: #fde68a; /* a highlight painted on the (white) page; the page filter handles night */
   --shadow: 0 1px 3px rgba(16, 23, 40, 0.08), 0 1px 2px rgba(16, 23, 40, 0.06);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -414,22 +415,42 @@ mark {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y pinch-zoom;
 }
-/* Centred with auto margins, not justify-content: when the zoomed page is wider
-   than the screen, auto margins collapse to zero and it scrolls from its left
-   edge. justify-content: center instead pushes the overflow off the left edge,
-   where it can never be scrolled to. */
-#pdfCanvas {
+/* The page sheet holds the canvas and the highlight layer together. It is centred
+   with auto margins, not justify-content: when the zoomed page is wider than the
+   screen, auto margins collapse to zero and it scrolls from its left edge.
+   justify-content: center instead pushes the overflow off the left edge, where it
+   can never be scrolled to. */
+.pdf-sheet {
+  position: relative;
+  isolation: isolate; /* highlights blend with the page, not with the app behind it */
   flex: none;
   margin: 0 auto;
+  width: fit-content;
+  height: fit-content;
   background: #fff;
   box-shadow: var(--shadow);
+}
+#pdfCanvas {
+  display: block;
   max-width: none;
-  height: fit-content;
 }
 /* Night reading: a white page is a flashlight in a dark cab. Only when the
-   theme is dark; "Normal" in Settings leaves the page untouched. */
-:root[data-theme="dark"][data-page-tone="dim"] #pdfCanvas { filter: brightness(0.8); }
-:root[data-theme="dark"][data-page-tone="invert"] #pdfCanvas { filter: invert(0.92) hue-rotate(180deg); }
+   theme is dark; "Normal" in Settings leaves the page untouched. The filter sits
+   on the sheet so the highlights are dimmed or inverted along with the page. */
+:root[data-theme="dark"][data-page-tone="dim"] .pdf-sheet { filter: brightness(0.8); }
+:root[data-theme="dark"][data-page-tone="invert"] .pdf-sheet { filter: invert(0.92) hue-rotate(180deg); }
+
+/* Where a search term sits on the page. Multiply keeps the page's own ink fully
+   dark under the highlight, so the matched text stays as legible as the rest. */
+.pdf-hls { position: absolute; inset: 0; pointer-events: none; }
+.pdf-hl {
+  position: absolute;
+  background: var(--match);
+  mix-blend-mode: multiply;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--match) 55%, #000);
+}
+.pdf-hl.current { box-shadow: 0 0 0 2px color-mix(in srgb, var(--match) 30%, #000); }
 
 .viewer-status {
   position: absolute;
@@ -498,6 +519,44 @@ mark {
 @media (max-width: 359px) {
   .dock-btn { width: 44px; height: 44px; }
 }
+
+/* The search term being highlighted on the page: what, how many here, next, clear. */
+.viewer-find {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.875rem;
+}
+.viewer-find[hidden] { display: none; }
+.find-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  white-space: nowrap;
+}
+.find-term { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.find-tally { flex-shrink: 0; white-space: pre; }
+.find-text mark { font-weight: 700; }
+.find-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.find-btn[hidden] { display: none; }
+.find-btn:active { background: var(--surface-2); }
+.find-clear { display: flex; align-items: center; justify-content: center; padding: 0; color: var(--text-dim); }
+.find-clear svg { width: 20px; height: 20px; }
 
 /* Videos that belong to the page being read: one row, expandable. */
 .viewer-video-bar {
