@@ -11,11 +11,28 @@ const STORAGE_KEYS = {
   favorites: "slco-protocols:favorites",
   theme: "slco-protocols:theme",
   textSize: "slco-protocols:text-size",
+  pageTone: "slco-protocols:page-tone",
+  zoom: "slco-protocols:zoom",
 };
+
+// localStorage throws in some private-browsing modes. Preferences are a
+// convenience, never a reason for the app to stop working.
+const store = {
+  get(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* not persisted */ }
+  },
+};
+
+// 100% is "the page's content fits the screen width".
+const ZOOM_STEPS = [0.75, 1, 1.5, 2, 2.5, 3];
 
 const state = {
   protocols: null,
   searchIndex: null,
+  pageText: new Map(), // "docId#page" -> flattened page text
   videos: [],
   savedVideos: new Set(), // ids saved for offline
   view: "home",
@@ -24,16 +41,18 @@ const state = {
   pdfDocs: new Map(), // docId -> pdfjs document proxy
   viewer: {
     docId: null,
-    title: null,
+    openTitle: null, // the title the viewer was opened with
+    openPage: 1,
     page: 1,
     numPages: 1,
-    zoom: 1, // multiplier on top of fit-to-width baseline (1 = fit width)
+    zoom: loadZoom(), // multiplier on top of the content-fit baseline (1 = fit)
     rendering: false,
   },
 };
 
 const el = {
   app: document.getElementById("app"),
+  topbar: document.getElementById("topbar"),
   topTitle: document.getElementById("topTitle"),
   backBtn: document.getElementById("backBtn"),
   favBtn: document.getElementById("favBtn"),
@@ -41,10 +60,13 @@ const el = {
   searchInput: document.getElementById("searchInput"),
   clearSearch: document.getElementById("clearSearch"),
   tabbar: document.getElementById("tabbar"),
+  announcer: document.getElementById("announcer"),
   viewer: document.getElementById("viewer"),
   viewerTitle: document.getElementById("viewerTitle"),
   viewerClose: document.getElementById("viewerClose"),
+  viewerStatus: document.getElementById("viewerStatus"),
   pdfCanvas: document.getElementById("pdfCanvas"),
+  pdfText: document.getElementById("pdfText"),
   canvasWrap: document.getElementById("viewerCanvasWrap"),
   prevPage: document.getElementById("prevPage"),
   nextPage: document.getElementById("nextPage"),
@@ -65,6 +87,17 @@ const el = {
   playerSave: document.getElementById("playerSave"),
 };
 
+// Spoken to screen readers through the polite live region. Delayed announcements
+// (search results while typing) restart on each call so only the last is read.
+let announceTimer = null;
+function announce(message, delay = 0) {
+  clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => {
+    el.announcer.textContent = "";
+    setTimeout(() => { el.announcer.textContent = message; }, 50);
+  }, delay);
+}
+
 const CATEGORY_ICONS = {
   "general-patient-care-guidelines": "🩺",
   "cardiac-patient-care-guidelines": "❤️",
@@ -76,15 +109,19 @@ const CATEGORY_ICONS = {
 
 function loadFavorites() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.favorites);
-    return new Set(raw ? JSON.parse(raw) : []);
+    return new Set(JSON.parse(store.get(STORAGE_KEYS.favorites) || "[]"));
   } catch {
     return new Set();
   }
 }
 
 function saveFavorites() {
-  localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([...state.favorites]));
+  store.set(STORAGE_KEYS.favorites, JSON.stringify([...state.favorites]));
+}
+
+function loadZoom() {
+  const z = Number(store.get(STORAGE_KEYS.zoom));
+  return ZOOM_STEPS.includes(z) ? z : 1;
 }
 
 function favKey(docId, page) {
@@ -102,6 +139,7 @@ async function loadData() {
   state.searchIndex = await searchRes.json();
   // Lower-case each page once; search runs on every keystroke.
   for (const pg of state.searchIndex) pg.lower = pg.text.toLowerCase();
+  state.pageText = new Map(state.searchIndex.map((pg) => [`${pg.docId}#${pg.page}`, pg.text]));
   buildPageContext();
   // Videos need the player markup; if this page is an older index.html,
   // leave them out rather than break the app.
@@ -124,15 +162,6 @@ async function refreshSavedVideos() {
   for (const req of await cache.keys()) if (!keep.has(req.url)) await cache.delete(req);
 }
 
-function findEntryByKey(key) {
-  const [docId, pageStr] = key.split("#");
-  const page = Number(pageStr);
-  const all = allNavEntries();
-  return all.find((e) => e.docId === docId && e.page === page) || {
-    docId, page, title: `${docId} p.${page}`,
-  };
-}
-
 function allNavEntries() {
   const p = state.protocols;
   if (!p) return [];
@@ -149,7 +178,10 @@ function allNavEntries() {
 function render() {
   el.searchWrap.hidden = state.view === "settings";
   el.tabbar.querySelectorAll(".tab-btn").forEach((b) => {
-    b.classList.toggle("active", b.dataset.view === state.view);
+    const on = b.dataset.view === state.view;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
   });
 
   if (state.query.trim()) {
@@ -185,10 +217,10 @@ function rowHTML(entry, opts = {}) {
   const isFav = state.favorites.has(key);
   return `
     <button class="row-btn" data-doc="${entry.docId}" data-page="${entry.page}" data-title="${escapeAttr(entry.title)}">
-      ${opts.icon ? `<span class="category-icon">${opts.icon}</span>` : ""}
+      ${opts.icon ? `<span class="category-icon" aria-hidden="true">${opts.icon}</span>` : ""}
       <span class="row-title">${escapeHtml(entry.title)}${opts.showSub ? `<div class="row-sub">${escapeHtml(opts.showSub)}</div>` : ""}</span>
       ${isFav ? favStarHTML() : ""}
-      <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`;
 }
 
@@ -200,14 +232,14 @@ function videoRowHTML(v) {
   const saved = state.savedVideos.has(v.id) ? " · Saved offline" : "";
   return `
     <button class="row-btn" data-video="${escapeAttr(v.id)}">
-      <span class="category-icon"><svg class="play-icon" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+      <span class="category-icon" aria-hidden="true"><svg class="play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
       <span class="row-title">${escapeHtml(v.title)}<div class="row-sub">${formatDuration(v.durationSec)} · ${escapeHtml(v.scope)}${saved}</div></span>
-      <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`;
 }
 
 function favStarHTML() {
-  return `<span class="row-fav-star"><svg viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="currentColor"/></svg></span>`;
+  return `<span class="row-fav-star"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="currentColor"/></svg></span>`;
 }
 
 function formatUpdatedDate(iso) {
@@ -221,22 +253,22 @@ function renderHome() {
   const p = state.protocols;
   const updated = formatUpdatedDate(p.sourceCheckedAt || p.generatedAt);
   let html = updated ? `<div class="updated-line">Updated ${updated}</div>` : "";
-  html += `<div class="section-title">Clinical Protocols</div><div class="card-list">`;
+  html += `<h2 class="section-title">Clinical Protocols</h2><div class="card-list">`;
   html += p.clinicalCategories.map((cat) => `
     <button class="row-btn" data-nav="category" data-cat="${cat.id}">
-      <span class="category-icon">${CATEGORY_ICONS[cat.id] || "📋"}</span>
+      <span class="category-icon" aria-hidden="true">${CATEGORY_ICONS[cat.id] || "📋"}</span>
       <span class="row-title">${escapeHtml(cat.title)}<div class="row-sub">${cat.protocols.length} ${cat.noun || "protocol"}${cat.protocols.length === 1 ? "" : "s"}</div></span>
-      <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`).join("");
   html += `</div>`;
 
   if (state.videos.length) {
-    html += `<div class="section-title">Procedure Videos</div><div class="card-list">`;
+    html += `<h2 class="section-title">Procedure Videos</h2><div class="card-list">`;
     html += state.videos.map((v) => videoRowHTML(v)).join("");
     html += `</div>`;
   }
 
-  html += `<div class="section-title">Reference</div><div class="card-list">`;
+  html += `<h2 class="section-title">Reference</h2><div class="card-list">`;
   html += p.reference.map((r) => rowHTML(r, { icon: "📄" })).join("");
   html += `</div>`;
 
@@ -246,7 +278,7 @@ function renderHome() {
 function renderCategory(catId) {
   const cat = state.protocols.clinicalCategories.find((c) => c.id === catId);
   if (!cat) return renderHome();
-  el.app.innerHTML = `<div class="section-title">${escapeHtml(cat.title)}</div><div class="card-list">${
+  el.app.innerHTML = `<h2 class="section-title">${escapeHtml(cat.title)}</h2><div class="card-list">${
     cat.protocols.map((pr) => rowHTML(pr)).join("")
   }</div>`;
   el.topTitle.textContent = cat.title;
@@ -254,66 +286,94 @@ function renderCategory(catId) {
   el.backBtn.onclick = () => { navBack(); };
 }
 
+// Favorites are stored as "doc#page", so any page can be saved, not just the
+// ones a bookmark starts on. Titles come from the same page -> protocol lookup
+// search uses.
 function renderFavorites() {
-  const all = allNavEntries();
-  const favs = all.filter((e) => state.favorites.has(favKey(e.docId, e.page)));
-  if (!favs.length) {
-    el.app.innerHTML = `<div class="empty-state">No favorites yet.<br>Tap the star inside a protocol to pin it here for quick access.</div>`;
+  const keys = [...state.favorites].reverse().filter((k) => state.protocols.documents[k.split("#")[0]]); // newest first
+  if (!keys.length) {
+    el.app.innerHTML = `<div class="empty-state">No favorites yet.<br>Tap the heart inside a protocol to pin that page here.</div>`;
     return;
   }
-  el.app.innerHTML = `<div class="card-list">${favs.map((f) => rowHTML(f)).join("")}</div>`;
+  el.app.innerHTML = `<div class="card-list">${keys.map(favoriteRowHTML).join("")}</div>`;
+}
+
+function favoriteRowHTML(key) {
+  const [docId, pageStr] = key.split("#");
+  const page = Number(pageStr);
+  const { title } = contextForPage(docId, page);
+  return `
+    <button class="row-btn" data-doc="${escapeAttr(docId)}" data-page="${page}" data-title="${escapeAttr(title)}">
+      <span class="row-title">${escapeHtml(title)}</span>
+      ${page > 1 ? `<span class="search-result-page">p.${page}</span>` : ""}
+      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    </button>`;
 }
 
 function renderAdmin() {
   const p = state.protocols;
-  let html = `<div class="section-title">Administrative & Operational</div><div class="card-list">${
+  let html = `<h2 class="section-title">Administrative & Operational</h2><div class="card-list">${
     p.administrative.map((a) => rowHTML(a, { icon: "📋" })).join("")
   }</div>`;
   if (p.departmentVariances && p.departmentVariances.length) {
-    html += `<div class="section-title">Department Variances</div><div class="card-list">${
+    html += `<h2 class="section-title">Department Variances</h2><div class="card-list">${
       p.departmentVariances.map((v) => rowHTML(v, { icon: "🚑" })).join("")
     }</div>`;
   }
   el.app.innerHTML = html;
 }
 
+function segmentedHTML(id, labelId, options, current) {
+  const buttons = options.map((o) =>
+    `<button data-val="${o.val}" aria-pressed="${o.val === current}"${o.label ? ` aria-label="${o.label}"` : ""}>${o.text}</button>`
+  ).join("");
+  return `<div class="segmented" id="${id}" role="group" aria-labelledby="${labelId}">${buttons}</div>`;
+}
+
 function renderSettings() {
-  const theme = localStorage.getItem(STORAGE_KEYS.theme) || "system";
-  const textSize = localStorage.getItem(STORAGE_KEYS.textSize) || "normal";
+  const theme = store.get(STORAGE_KEYS.theme) || "system";
+  const textSize = store.get(STORAGE_KEYS.textSize) || "normal";
+  const tone = store.get(STORAGE_KEYS.pageTone) || "dim";
   el.app.innerHTML = `
-    <div class="section-title">Appearance</div>
+    <h2 class="section-title">Appearance</h2>
     <div class="card-list">
       <div class="settings-row">
-        <span class="settings-label">Theme</span>
-        <div class="segmented" id="themeSeg">
-          <button data-val="light" class="${theme === "light" ? "active" : ""}">Light</button>
-          <button data-val="system" class="${theme === "system" ? "active" : ""}">Auto</button>
-          <button data-val="dark" class="${theme === "dark" ? "active" : ""}">Dark</button>
-        </div>
+        <span class="settings-label" id="lblTheme">Theme</span>
+        ${segmentedHTML("themeSeg", "lblTheme", [
+          { val: "light", text: "Light" }, { val: "system", text: "Auto" }, { val: "dark", text: "Dark" },
+        ], theme)}
       </div>
       <div class="settings-row">
-        <span class="settings-label">Text size</span>
-        <div class="segmented" id="textSeg">
-          <button data-val="normal" class="${textSize === "normal" ? "active" : ""}">A</button>
-          <button data-val="large" class="${textSize === "large" ? "active" : ""}">A+</button>
-        </div>
+        <span class="settings-label" id="lblText">Text size</span>
+        ${segmentedHTML("textSeg", "lblText", [
+          { val: "normal", text: "A", label: "Normal" }, { val: "large", text: "A+", label: "Large" }, { val: "xlarge", text: "A++", label: "Largest" },
+        ], textSize)}
+      </div>
+      <div class="settings-row">
+        <span>
+          <div class="settings-label" id="lblTone">Pages at night</div>
+          <div class="settings-sub">Dims or inverts PDF pages while the theme is dark</div>
+        </span>
+        ${segmentedHTML("toneSeg", "lblTone", [
+          { val: "off", text: "Normal" }, { val: "dim", text: "Dim" }, { val: "invert", text: "Invert" },
+        ], tone)}
       </div>
     </div>
 
-    <div class="section-title">Offline Access</div>
+    <h2 class="section-title">Offline Access</h2>
     <div class="card-list">
       <div class="settings-row">
         <span>
           <div class="settings-label">Download all protocols</div>
           <div class="settings-sub">Caches every PDF${state.videos.length ? " and procedure video" : ""} for use with no signal</div>
         </span>
-        <button class="icon-btn" id="downloadAllBtn" style="width:auto;height:auto;color:var(--accent);font-weight:700;font-size:14px;padding:6px 10px;">Download</button>
+        <button class="action-btn" id="downloadAllBtn">Download</button>
       </div>
-      <div class="download-status" id="downloadStatus"></div>
-      <div class="progress-bar" id="downloadProgressBar" hidden><div class="progress-bar-fill" id="downloadProgressFill"></div></div>
+      <div class="download-status" id="downloadStatus" role="status"></div>
+      <div class="progress-bar" id="downloadProgressBar" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="progress-bar-fill" id="downloadProgressFill"></div></div>
     </div>
 
-    <div class="section-title">About</div>
+    <h2 class="section-title">About</h2>
     <div class="card-list">
       <div class="settings-row">
         <span class="settings-label">Source</span>
@@ -322,19 +382,21 @@ function renderSettings() {
     </div>
   `;
 
-  document.getElementById("themeSeg").addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    setTheme(btn.dataset.val);
-    renderSettings();
-  });
-  document.getElementById("textSeg").addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    setTextSize(btn.dataset.val);
-    renderSettings();
-  });
+  // Update the pressed state in place so keyboard focus stays on the control.
+  const bindSegmented = (id, apply) => {
+    const group = document.getElementById(id);
+    group.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      apply(btn.dataset.val);
+      group.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    });
+  };
+  bindSegmented("themeSeg", setTheme);
+  bindSegmented("textSeg", setTextSize);
+  bindSegmented("toneSeg", setPageTone);
   document.getElementById("downloadAllBtn").addEventListener("click", downloadAllForOffline);
+  refreshOfflineStatus();
 }
 
 // ---------- Search ----------
@@ -478,6 +540,11 @@ function renderSearchResults() {
     renderNoResults(raw);
     return;
   }
+  const byName = videoMatches.length + titleMatches.length;
+  announce(
+    `${byName} ${byName === 1 ? "match" : "matches"} by name, ${textMatches.length} more ${textMatches.length === 1 ? "page mentions" : "pages mention"} ${raw}`,
+    700
+  );
 
   let html = "";
   const top = videoMatches.length + titleMatches.length;
@@ -489,7 +556,7 @@ function renderSearchResults() {
   }
   if (textMatches.length) {
     const n = textMatches.length;
-    html += `<div class="section-title">${top ? "Also mentioned" : "Mentioned"} on ${n} page${n === 1 ? "" : "s"}</div>`;
+    html += `<h2 class="section-title">${top ? "Also mentioned" : "Mentioned"} on ${n} page${n === 1 ? "" : "s"}</h2>`;
     html += `<div class="card-list">${textMatches.slice(0, MAX_TEXT_RESULTS).map((m) => textHitRowHTML(m, groups)).join("")}</div>`;
     if (n > MAX_TEXT_RESULTS) {
       html += `<div class="search-note">Showing the ${MAX_TEXT_RESULTS} best matches of ${n}. Add a word to narrow it down.</div>`;
@@ -500,6 +567,7 @@ function renderSearchResults() {
 
 function renderNoResults(raw) {
   const fix = suggestCorrection(raw);
+  announce(fix ? `No results for ${raw}. Did you mean ${fix}?` : `No results for ${raw}`, 700);
   let html = `<div class="empty-state${fix ? " tight" : ""}">No results for “${escapeHtml(raw)}”</div>`;
   if (fix) {
     html += `<div class="card-list"><button class="row-btn" data-suggest="${escapeAttr(fix)}">
@@ -645,16 +713,17 @@ el.app.addEventListener("click", (e) => {
   const navBtn = e.target.closest("[data-nav='category']");
   if (navBtn) {
     applyNav({ type: "category", catId: navBtn.dataset.cat });
+    announce(el.topTitle.textContent);
     return;
   }
   const videoBtn = e.target.closest(".row-btn[data-video]");
   if (videoBtn) {
-    openPlayer(videoBtn.dataset.video);
+    openPlayer(videoBtn.dataset.video, videoBtn);
     return;
   }
   const rowBtn = e.target.closest(".row-btn[data-doc]");
   if (rowBtn) {
-    openViewer(rowBtn.dataset.doc, Number(rowBtn.dataset.page), rowBtn.dataset.title);
+    openViewer(rowBtn.dataset.doc, Number(rowBtn.dataset.page), rowBtn.dataset.title, rowBtn);
   }
 });
 
@@ -667,6 +736,7 @@ el.tabbar.addEventListener("click", (e) => {
   el.searchInput.value = "";
   el.clearSearch.hidden = true;
   render();
+  announce(el.topTitle.textContent);
 });
 
 el.searchInput.addEventListener("input", () => {
@@ -682,6 +752,57 @@ el.clearSearch.addEventListener("click", () => {
   el.searchInput.blur();
 });
 
+// ---------- Dialogs (PDF viewer, video player) ----------
+
+// While a dialog is open everything behind it is inert: not focusable, not
+// readable by a screen reader, not tappable. The video player opens over the
+// viewer, so then the viewer is what goes inert.
+function selectorFor(node) {
+  if (!node || node === document.body) return null;
+  const d = node.dataset || {};
+  if (d.doc) return `.row-btn[data-doc="${CSS.escape(d.doc)}"][data-page="${CSS.escape(d.page)}"]`;
+  if (d.video) return `[data-video="${CSS.escape(d.video)}"]`;
+  if (d.nav) return `[data-cat="${CSS.escape(d.cat)}"]`;
+  return node.id ? `#${CSS.escape(node.id)}` : null;
+}
+
+function openDialog(dialog, initialFocus, trigger) {
+  const layer = dialog === el.player && !el.viewer.hidden ? [el.viewer] : [el.topbar, el.searchWrap, el.app, el.tabbar];
+  layer.forEach((n) => n.setAttribute("inert", ""));
+  dialog._layer = layer;
+  dialog._returnTo = selectorFor(trigger);
+  dialog.hidden = false;
+  initialFocus?.focus({ preventScroll: true });
+}
+
+function closeDialog(dialog) {
+  dialog.hidden = true;
+  (dialog._layer || []).forEach((n) => n.removeAttribute("inert"));
+  dialog._layer = null;
+  return dialog._returnTo;
+}
+
+// Put focus back where the user was, after the list behind has re-rendered.
+function restoreFocus(selector) {
+  const target = (selector && document.querySelector(selector)) || el.app;
+  target.focus({ preventScroll: true });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "Escape") {
+    if (!el.player.hidden) closePlayer();
+    else if (!el.viewer.hidden) closeViewer();
+    return;
+  }
+  if (el.viewer.hidden || !el.player.hidden) return;
+  if (/^(input|textarea|select)$/i.test(document.activeElement?.tagName || "")) return;
+  if (e.key === "ArrowRight") el.nextPage.click();
+  else if (e.key === "ArrowLeft") el.prevPage.click();
+  else if (e.key === "+" || e.key === "=") el.zoomIn.click();
+  else if (e.key === "-") el.zoomOut.click();
+});
+
 // ---------- PDF Viewer ----------
 
 async function getPdfDoc(docId) {
@@ -693,43 +814,115 @@ async function getPdfDoc(docId) {
   return doc;
 }
 
-async function openViewer(docId, page, title) {
-  state.viewer.docId = docId;
-  state.viewer.title = title || docTitle(docId);
-  state.viewer.page = page || 1;
-  state.viewer.zoom = 1; // reset to fit-width whenever a fresh document/protocol is opened
-  el.viewer.hidden = false;
-  el.viewerTitle.textContent = state.viewer.title;
+// Where a page's ink actually is. County PDFs carry wide blank margins, so
+// "100%" fits the content, not the paper: the same screen shows larger type.
+// Measured from a small render, so images and colour bars count as content too.
+const cropCache = new Map();
+async function contentRange(docId, page, pageNum) {
+  const key = `${docId}#${pageNum}`;
+  if (cropCache.has(key)) return cropCache.get(key);
+  let range = { x0: 0, x1: 1 };
+  try {
+    const vp = page.getViewport({ scale: 0.35 });
+    const probe = document.createElement("canvas");
+    probe.width = Math.ceil(vp.width);
+    probe.height = Math.ceil(vp.height);
+    const ctx = probe.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, probe.width, probe.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const { data, width, height } = ctx.getImageData(0, 0, probe.width, probe.height);
+    let min = width;
+    let max = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0, i = y * width * 4; x < width; x++, i += 4) {
+        if (data[i] < 235 || data[i + 1] < 235 || data[i + 2] < 235) {
+          if (x < min) min = x;
+          if (x > max) max = x;
+        }
+      }
+    }
+    if (max >= 0) {
+      const pad = 0.03;
+      range = { x0: Math.max(0, min / width - pad), x1: Math.min(1, (max + 1) / width + pad) };
+    }
+    if (range.x1 - range.x0 < 0.5) range = { x0: 0, x1: 1 }; // a mostly blank page: show it whole
+  } catch (err) {
+    console.warn("Couldn't measure page content", err);
+  }
+  cropCache.set(key, range);
+  return range;
+}
+
+function setViewerStatus(message, retry) {
+  el.viewerStatus.replaceChildren();
+  el.viewerStatus.hidden = !message;
+  el.canvasWrap.setAttribute("aria-busy", String(Boolean(message) && !retry));
+  if (!message) return;
+  el.viewerStatus.append(message);
+  if (retry) {
+    const btn = document.createElement("button");
+    btn.textContent = "Try again";
+    btn.onclick = retry;
+    el.viewerStatus.append(btn);
+  }
+}
+
+function showViewerError(err) {
+  console.error("PDF viewer error", err);
+  const v = state.viewer;
+  setViewerStatus(
+    navigator.onLine
+      ? "Couldn't load this page."
+      : "Couldn't load this page. You're offline. Download protocols from Settings while you have signal.",
+    () => openViewer(v.docId, v.page, v.openTitle)
+  );
+}
+
+async function openViewer(docId, page, title, trigger) {
+  const v = state.viewer;
+  v.docId = docId;
+  v.page = page || 1;
+  v.openPage = v.page;
+  v.openTitle = title || docTitle(docId);
+  v.zoom = loadZoom(); // the zoom the reader last chose, not a reset
+  el.viewerTitle.textContent = v.openTitle;
+  el.pageIndicator.textContent = "…";
+  el.pdfText.textContent = "";
+  setViewerStatus("Loading…");
   updateFavButton();
+  updateDock();
+  if (el.viewer.hidden) openDialog(el.viewer, el.viewerClose, trigger);
 
   try {
     const doc = await getPdfDoc(docId);
-    state.viewer.numPages = doc.numPages;
+    v.numPages = doc.numPages;
     await renderPage("open");
   } catch (err) {
-    console.error("Failed to open PDF", err);
-    el.canvasWrap.innerHTML = `<div class="empty-state" style="color:var(--text)">Couldn't load this document. If you're offline, download it first from Settings.</div>`;
+    showViewerError(err);
   }
 }
 
 // What the viewer was asked to do decides where the page should sit afterwards:
 //   open: a new document starts at its top-left
 //   page: a new page starts at its top, keeping the zoomed-in column position
-//   zoom: the same spot stays in the middle of the screen (also used on rotate)
+//   zoom: the same spot stays where it was on screen (also used on rotate)
 // A request that arrives mid-render is remembered, not dropped, and runs with
 // the latest page and zoom as soon as the current one finishes.
 const RENDER_RANK = { zoom: 0, page: 1, open: 2 };
 let queuedRender = null;
+let pendingAnchorPoint = null; // a screen point to hold still while zooming (double-tap)
 
 function captureAnchor() {
-  const w = el.canvasWrap.getBoundingClientRect();
+  const wrap = el.canvasWrap;
+  const w = wrap.getBoundingClientRect();
   const c = el.pdfCanvas.getBoundingClientRect();
   if (!c.width || !c.height) return null;
+  const sx = pendingAnchorPoint ? pendingAnchorPoint.x - w.left : wrap.clientWidth / 2;
+  const sy = pendingAnchorPoint ? pendingAnchorPoint.y - w.top : wrap.clientHeight / 2;
+  pendingAnchorPoint = null;
   const clamp = (n) => Math.min(1, Math.max(0, n));
-  return {
-    fx: clamp((w.left + el.canvasWrap.clientWidth / 2 - c.left) / c.width),
-    fy: clamp((w.top + el.canvasWrap.clientHeight / 2 - c.top) / c.height),
-  };
+  return { sx, sy, fx: clamp((w.left + sx - c.left) / c.width), fy: clamp((w.top + sy - c.top) / c.height) };
 }
 
 function restoreScroll(mode, anchor) {
@@ -742,8 +935,8 @@ function restoreScroll(mode, anchor) {
   } else if (anchor) {
     const w = wrap.getBoundingClientRect();
     const c = el.pdfCanvas.getBoundingClientRect();
-    wrap.scrollLeft += c.left - w.left - (wrap.clientWidth / 2 - anchor.fx * c.width);
-    wrap.scrollTop += c.top - w.top - (wrap.clientHeight / 2 - anchor.fy * c.height);
+    wrap.scrollLeft += c.left - w.left - (anchor.sx - anchor.fx * c.width);
+    wrap.scrollTop += c.top - w.top - (anchor.sy - anchor.fy * c.height);
   }
 }
 
@@ -758,38 +951,48 @@ async function renderPage(mode = "page") {
   }
   state.viewer.rendering = true;
   try {
-    const doc = await getPdfDoc(state.viewer.docId);
-    const pageNum = Math.min(Math.max(1, state.viewer.page), doc.numPages);
-    state.viewer.page = pageNum;
+    const v = state.viewer;
+    const doc = await getPdfDoc(v.docId);
+    const pageNum = Math.min(Math.max(1, v.page), doc.numPages);
+    v.page = pageNum;
     const page = await doc.getPage(pageNum);
+    if (mode !== "zoom") pendingAnchorPoint = null;
 
-    // Fit-to-width baseline: the unscaled page width maps to the available
-    // canvas-wrap width, then the user's zoom multiplier is applied on top.
-    const unscaledViewport = page.getViewport({ scale: 1 });
+    // Fit the page's content (not its blank margins) to the available width,
+    // then apply the reader's zoom on top.
+    const unscaled = page.getViewport({ scale: 1 });
+    const crop = await contentRange(v.docId, page, pageNum);
+    const cropW = unscaled.width * (crop.x1 - crop.x0);
     const wrapStyle = getComputedStyle(el.canvasWrap);
-    const availableWidth = el.canvasWrap.clientWidth
-      - parseFloat(wrapStyle.paddingLeft) - parseFloat(wrapStyle.paddingRight);
-    const baseScale = availableWidth / unscaledViewport.width;
-    const cssScale = baseScale * state.viewer.zoom;
+    const availableWidth = el.canvasWrap.clientWidth - parseFloat(wrapStyle.paddingLeft) - parseFloat(wrapStyle.paddingRight);
+    const cssScale = (availableWidth / cropW) * v.zoom;
     const dpr = window.devicePixelRatio || 1;
 
     let renderScale = cssScale * dpr;
-    const pixels = unscaledViewport.width * unscaledViewport.height * renderScale * renderScale;
+    const pixels = cropW * unscaled.height * renderScale * renderScale;
     if (pixels > MAX_CANVAS_PIXELS) renderScale *= Math.sqrt(MAX_CANVAS_PIXELS / pixels);
-    const renderViewport = page.getViewport({ scale: renderScale });
+    const renderViewport = page.getViewport({ scale: renderScale, offsetX: -crop.x0 * unscaled.width * renderScale });
     const canvas = el.pdfCanvas;
     const ctx = canvas.getContext("2d");
     const anchor = mode === "zoom" ? captureAnchor() : null; // measured before the canvas changes size
-    canvas.width = renderViewport.width;
-    canvas.height = renderViewport.height;
-    canvas.style.width = `${cssScale * unscaledViewport.width}px`;
-    canvas.style.height = `${cssScale * unscaledViewport.height}px`;
+    canvas.width = Math.ceil(cropW * renderScale);
+    canvas.height = Math.ceil(renderViewport.height);
+    canvas.style.width = `${cssScale * cropW}px`;
+    canvas.style.height = `${cssScale * unscaled.height}px`;
     restoreScroll(mode, anchor);
     await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+
+    setViewerStatus("");
+    el.viewerTitle.textContent = pageNum === v.openPage ? v.openTitle : contextForPage(v.docId, pageNum).title;
+    // The canvas is a picture of text; this is the same page's text for assistive tech.
+    el.pdfText.textContent = state.pageText.get(`${v.docId}#${pageNum}`) || "No text is available for this page.";
     el.pageIndicator.textContent = `${pageNum} / ${doc.numPages}`;
-    el.zoomIndicator.textContent = `${Math.round(state.viewer.zoom * 100)}%`;
+    el.zoomIndicator.textContent = `${Math.round(v.zoom * 100)}%`;
     updateFavButton();
+    updateDock();
     updateVideoBar();
+  } catch (err) {
+    showViewerError(err);
   } finally {
     state.viewer.rendering = false;
     if (queuedRender) {
@@ -801,8 +1004,16 @@ async function renderPage(mode = "page") {
 }
 
 function updateFavButton() {
-  const key = favKey(state.viewer.docId, state.viewer.page);
-  el.favBtn.classList.toggle("active", state.favorites.has(key));
+  const on = state.favorites.has(favKey(state.viewer.docId, state.viewer.page));
+  el.favBtn.setAttribute("aria-pressed", String(on));
+}
+
+function updateDock() {
+  const v = state.viewer;
+  el.prevPage.disabled = v.page <= 1;
+  el.nextPage.disabled = v.page >= v.numPages;
+  el.zoomOut.disabled = v.zoom <= ZOOM_STEPS[0];
+  el.zoomIn.disabled = v.zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
 }
 
 el.favBtn.addEventListener("click", () => {
@@ -811,54 +1022,85 @@ el.favBtn.addEventListener("click", () => {
   else state.favorites.add(key);
   saveFavorites();
   updateFavButton();
+  announce(state.favorites.has(key) ? "Added to favorites" : "Removed from favorites");
 });
 
 el.viewerClose.addEventListener("click", closeViewer);
 function closeViewer() {
-  el.viewer.hidden = true;
+  const back = closeDialog(el.viewer);
   const top = navStack[navStack.length - 1];
   if (top && top.type === "category") applyNav(top, false);
   else render();
+  restoreFocus(back);
 }
 
 el.prevPage.addEventListener("click", () => {
   state.viewer.page = Math.max(1, state.viewer.page - 1);
+  updateDock();
   renderPage("page");
 });
 el.nextPage.addEventListener("click", () => {
   state.viewer.page = Math.min(state.viewer.numPages, state.viewer.page + 1);
+  updateDock();
   renderPage("page");
 });
-el.zoomIn.addEventListener("click", () => {
-  state.viewer.zoom = Math.min(3, state.viewer.zoom + 0.25);
-  renderPage("zoom");
-});
-el.zoomOut.addEventListener("click", () => {
-  state.viewer.zoom = Math.max(0.5, state.viewer.zoom - 0.25);
-  renderPage("zoom");
-});
 
-// Swipe left/right to change page on the canvas area
-(function setupSwipe() {
-  let startX = null, startY = null, moved = false;
-  el.canvasWrap.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) return;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    moved = false;
+function nextZoom(dir) {
+  const z = state.viewer.zoom;
+  const steps = dir > 0 ? ZOOM_STEPS.filter((s) => s > z + 1e-9) : ZOOM_STEPS.filter((s) => s < z - 1e-9).reverse();
+  return steps[0] ?? z;
+}
+function setZoom(zoom, anchorPoint) {
+  if (zoom === state.viewer.zoom) return;
+  state.viewer.zoom = zoom;
+  store.set(STORAGE_KEYS.zoom, String(zoom));
+  pendingAnchorPoint = anchorPoint || null;
+  el.zoomIndicator.textContent = `${Math.round(zoom * 100)}%`;
+  updateDock();
+  renderPage("zoom");
+}
+el.zoomIn.addEventListener("click", () => setZoom(nextZoom(1)));
+el.zoomOut.addEventListener("click", () => setZoom(nextZoom(-1)));
+
+// Double-tap toggles between fit and a readable zoom around the tapped spot.
+function toggleZoomAt(x, y) {
+  setZoom(state.viewer.zoom < 1.5 ? 2 : 1, { x, y });
+}
+
+// Gestures on the page: a horizontal swipe turns the page (unless the page is
+// zoomed past the screen, when it pans), and a double-tap zooms.
+(function setupGestures() {
+  const wrap = el.canvasWrap;
+  let start = null;
+  let lastTap = { t: 0, x: 0, y: 0 };
+  let lastDoubleTap = 0;
+  wrap.addEventListener("touchstart", (e) => {
+    start = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
   }, { passive: true });
-  el.canvasWrap.addEventListener("touchmove", () => { moved = true; }, { passive: true });
-  el.canvasWrap.addEventListener("touchend", (e) => {
-    if (startX === null) return;
-    const endX = (e.changedTouches[0] || {}).clientX ?? startX;
-    const endY = (e.changedTouches[0] || {}).clientY ?? startY;
-    const dx = endX - startX;
-    const dy = endY - startY;
-    if (moved && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5 && el.canvasWrap.scrollWidth <= el.canvasWrap.clientWidth + 4) {
-      if (dx < 0) el.nextPage.click();
-      else el.prevPage.click();
+  wrap.addEventListener("touchend", (e) => {
+    if (!start || e.changedTouches.length !== 1) { start = null; return; }
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    start = null;
+    if (Math.hypot(dx, dy) < 10) {
+      const now = Date.now();
+      if (now - lastTap.t < 320 && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 30) {
+        lastTap.t = 0;
+        lastDoubleTap = now;
+        toggleZoomAt(t.clientX, t.clientY);
+      } else {
+        lastTap = { t: now, x: t.clientX, y: t.clientY };
+      }
+      return;
     }
-    startX = null;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5 && wrap.scrollWidth <= wrap.clientWidth + 4) {
+      (dx < 0 ? el.nextPage : el.prevPage).click();
+    }
+  });
+  // Mouse users (and some browsers after a touch double-tap): don't toggle twice.
+  wrap.addEventListener("dblclick", (e) => {
+    if (Date.now() - lastDoubleTap > 600) toggleZoomAt(e.clientX, e.clientY);
   });
 })();
 
@@ -876,18 +1118,32 @@ function videosForPage(docId, page) {
 }
 
 function updateVideoBar() {
-  if (!el.viewerVideoBar) return;
+  const bar = el.viewerVideoBar;
+  if (!bar) return;
   const vs = videosForPage(state.viewer.docId, state.viewer.page);
-  el.viewerVideoBar.hidden = !vs.length;
-  el.viewerVideoBar.innerHTML = vs
-    .map(
-      (v) => `<button class="viewer-video-link" data-video="${escapeAttr(v.id)}">
-        <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
-        <span>Watch: ${escapeHtml(v.title)} (${formatDuration(v.durationSec)})</span>
-      </button>`
-    )
-    .join("");
-  el.viewerVideoBar.querySelectorAll("button").forEach((b) => (b.onclick = () => openPlayer(b.dataset.video)));
+  bar.hidden = vs.length === 0;
+  if (!vs.length) {
+    bar.innerHTML = "";
+    return;
+  }
+  const play = `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>`;
+  const link = (v, label) => `<button class="viewer-video-link" data-video="${escapeAttr(v.id)}">${play}<span>${label}<span class="video-len"> (${formatDuration(v.durationSec)})</span></span></button>`;
+  if (vs.length === 1) {
+    bar.innerHTML = link(vs[0], `Watch: ${escapeHtml(vs[0].title)}`);
+  } else {
+    // Several procedures on one page: one row, expanded on demand.
+    bar.innerHTML = `
+      <button class="viewer-video-toggle" aria-expanded="false" aria-controls="viewerVideoList">${play}<span>Procedure videos on this page (${vs.length})</span><svg class="chev" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="viewer-video-list" id="viewerVideoList" hidden>${vs.map((v) => link(v, escapeHtml(v.title))).join("")}</div>`;
+    const toggle = bar.querySelector(".viewer-video-toggle");
+    const list = bar.querySelector(".viewer-video-list");
+    toggle.onclick = () => {
+      const open = list.hidden;
+      list.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+    };
+  }
+  bar.querySelectorAll(".viewer-video-link").forEach((b) => (b.onclick = () => openPlayer(b.dataset.video, b)));
 }
 
 function protocolEntryFor(v) {
@@ -897,15 +1153,15 @@ function protocolEntryFor(v) {
   return page ? { docId: page.docId, page: page.page, title: docTitle(page.docId) } : null;
 }
 
-function openPlayer(id) {
+function openPlayer(id, trigger) {
   const v = state.videos.find((x) => x.id === id);
   if (!v) return;
   const video = el.playerVideo;
   el.playerTitle.textContent = v.title;
   video.poster = v.poster;
   video.src = v.file;
-  el.player.hidden = false;
   el.player.dataset.video = v.id;
+  openDialog(el.player, el.playerClose, trigger);
   const entry = protocolEntryFor(v);
   el.playerProtocol.hidden = !entry || !el.viewer.hidden;
   el.playerProtocol.onclick = () => {
@@ -914,7 +1170,8 @@ function openPlayer(id) {
   };
   el.playerSave.onclick = () => saveVideo(v);
   updatePlayerOffline(v);
-  video.play().catch(() => {}); // autoplay may be blocked; the controls are there
+  // A reader who asked for reduced motion gets a video that waits for Play.
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {}); // autoplay may be blocked; the controls are there
 }
 
 function updatePlayerOffline(v, message) {
@@ -943,8 +1200,9 @@ function closePlayer() {
   video.pause();
   video.removeAttribute("src");
   video.load(); // stop any download in progress
-  el.player.hidden = true;
+  const back = closeDialog(el.player);
   if (el.viewer.hidden) render();
+  restoreFocus(back);
 }
 
 el.playerClose?.addEventListener("click", closePlayer);
@@ -956,33 +1214,82 @@ el.playerVideo?.addEventListener("error", () => {
   }
 });
 
-// ---------- Theme / text size ----------
+// ---------- Theme / text size / page tone ----------
+
+// "Auto" is resolved here (and in index.html before first paint) to light or
+// dark, so the stylesheet only ever has one dark palette.
+const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+const CHROME_COLORS = { light: "#1d4ed8", dark: "#14213d" }; // the status-bar tint matches the top bar
+const TEXT_SCALES = { normal: "100%", large: "125%", xlarge: "150%" };
 
 function setTheme(val) {
-  localStorage.setItem(STORAGE_KEYS.theme, val);
+  store.set(STORAGE_KEYS.theme, val);
   applyTheme();
 }
 function applyTheme() {
-  const val = localStorage.getItem(STORAGE_KEYS.theme) || "system";
-  if (val === "system") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.setAttribute("data-theme", val);
+  const pref = store.get(STORAGE_KEYS.theme) || "system";
+  const theme = pref === "dark" || (pref !== "light" && darkQuery.matches) ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", theme);
+  document.getElementById("themeColor")?.setAttribute("content", CHROME_COLORS[theme]);
 }
+darkQuery.addEventListener?.("change", () => {
+  if ((store.get(STORAGE_KEYS.theme) || "system") === "system") applyTheme();
+});
+
 function setTextSize(val) {
-  localStorage.setItem(STORAGE_KEYS.textSize, val);
+  store.set(STORAGE_KEYS.textSize, val);
   applyTextSize();
 }
 function applyTextSize() {
-  const val = localStorage.getItem(STORAGE_KEYS.textSize) || "normal";
-  document.documentElement.style.fontSize = val === "large" ? "112.5%" : "100%";
+  document.documentElement.style.fontSize = TEXT_SCALES[store.get(STORAGE_KEYS.textSize) || "normal"] || "100%";
+}
+
+function setPageTone(val) {
+  store.set(STORAGE_KEYS.pageTone, val);
+  applyPageTone();
+}
+function applyPageTone() {
+  document.documentElement.setAttribute("data-page-tone", store.get(STORAGE_KEYS.pageTone) || "dim");
+}
+
+// The bars are sized by their text, so measure them instead of guessing: the
+// sticky search box and the bottom padding follow the real heights.
+function observeChromeHeights() {
+  if (!("ResizeObserver" in window)) return;
+  const set = () => {
+    const root = document.documentElement.style;
+    root.setProperty("--topbar-h", `${el.topbar.offsetHeight}px`);
+    root.setProperty("--tabbar-h", `${el.tabbar.offsetHeight}px`);
+  };
+  const ro = new ResizeObserver(set);
+  ro.observe(el.topbar);
+  ro.observe(el.tabbar);
+  set();
 }
 
 // ---------- Offline download ----------
+
+// What's on this device right now, so Settings answers "will this work with no
+// signal?" every time it's opened, not just right after a download.
+async function refreshOfflineStatus() {
+  const statusEl = document.getElementById("downloadStatus");
+  if (!statusEl || !("caches" in window)) return;
+  const files = Object.values(state.protocols.documents).map((d) => `pdfs/${d.file}`);
+  const saved = (await Promise.all(files.map((f) => caches.match(f)))).filter(Boolean).length;
+  if (statusEl.dataset.busy || !statusEl.isConnected) return; // a download is reporting its own progress, or the view changed
+  statusEl.textContent = saved === files.length
+    ? `All ${files.length} documents are saved on this device.`
+    : saved
+      ? `${saved} of ${files.length} documents are saved on this device.`
+      : "Nothing saved yet (about 7 MB).";
+}
 
 // PDFs are fetched through the service worker, which stores them in its own
 // versioned runtime cache. Writing to a cache from here instead would use a
 // name the service worker doesn't know about, and it deletes unknown caches
 // every time it updates.
 async function downloadAllForOffline() {
+  const btn = document.getElementById("downloadAllBtn");
   const statusEl = document.getElementById("downloadStatus");
   const barEl = document.getElementById("downloadProgressBar");
   const fillEl = document.getElementById("downloadProgressFill");
@@ -990,46 +1297,56 @@ async function downloadAllForOffline() {
     statusEl.textContent = "Offline storage isn't ready yet. Reload the app, then try again.";
     return;
   }
+  btn.disabled = true; // no second download while one is running
+  statusEl.dataset.busy = "1";
   const files = Object.values(state.protocols.documents).map((d) => `pdfs/${d.file}`);
   barEl.hidden = false;
-  let done = 0;
-  statusEl.textContent = `Downloading ${done}/${files.length}…`;
-  for (const f of files) {
-    try {
-      const res = await fetch(f);
-      await res.arrayBuffer();
-    } catch (err) {
-      console.warn("Failed to download", f, err);
-    }
-    done += 1;
-    fillEl.style.width = `${Math.round((done / files.length) * 100)}%`;
+  const progress = (done) => {
+    const pct = Math.round((done / files.length) * 100);
+    fillEl.style.width = `${pct}%`;
+    barEl.setAttribute("aria-valuenow", String(pct));
     statusEl.textContent = `Downloading ${done}/${files.length}…`;
-  }
-  // The service worker finishes writing each file just after handing it back.
-  let saved = 0;
-  for (let tries = 0; tries < 10; tries++) {
-    saved = (await Promise.all(files.map((f) => caches.match(f)))).filter(Boolean).length;
-    if (saved === files.length) break;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  let videoNote = "";
-  if (state.videos.length) {
-    statusEl.textContent = "Downloading procedure videos…";
-    const cache = await caches.open(VIDEO_CACHE);
-    for (const v of state.videos) {
+  };
+  try {
+    progress(0);
+    for (let i = 0; i < files.length; i++) {
       try {
-        if (!(await cache.match(v.file))) await cache.addAll([v.file, v.poster]);
-        state.savedVideos.add(v.id);
+        const res = await fetch(files[i]);
+        await res.arrayBuffer();
       } catch (err) {
-        console.warn("Failed to save video", v.file, err);
+        console.warn("Failed to download", files[i], err);
       }
+      progress(i + 1);
     }
-    const n = state.videos.filter((v) => state.savedVideos.has(v.id)).length;
-    videoNote = ` ${n} of ${state.videos.length} video${state.videos.length === 1 ? "" : "s"} saved.`;
+    // The service worker finishes writing each file just after handing it back.
+    let saved = 0;
+    for (let tries = 0; tries < 10; tries++) {
+      saved = (await Promise.all(files.map((f) => caches.match(f)))).filter(Boolean).length;
+      if (saved === files.length) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    let videoNote = "";
+    if (state.videos.length) {
+      statusEl.textContent = "Downloading procedure videos…";
+      const cache = await caches.open(VIDEO_CACHE);
+      for (const v of state.videos) {
+        try {
+          if (!(await cache.match(v.file))) await cache.addAll([v.file, v.poster]);
+          state.savedVideos.add(v.id);
+        } catch (err) {
+          console.warn("Failed to save video", v.file, err);
+        }
+      }
+      const n = state.videos.filter((v) => state.savedVideos.has(v.id)).length;
+      videoNote = ` ${n} of ${state.videos.length} video${state.videos.length === 1 ? "" : "s"} saved.`;
+    }
+    statusEl.textContent = (saved === files.length
+      ? `All ${files.length} documents are saved on this device.`
+      : `${saved} of ${files.length} documents saved. Check your connection and try again.`) + videoNote;
+  } finally {
+    delete statusEl.dataset.busy;
+    btn.disabled = false;
   }
-  statusEl.textContent = (saved === files.length
-    ? `All ${files.length} documents available offline.`
-    : `${saved} of ${files.length} documents saved. Check your connection and try again.`) + videoNote;
 }
 
 window.addEventListener("resize", () => {
@@ -1073,10 +1390,13 @@ function setupServiceWorker() {
 async function init() {
   applyTheme();
   applyTextSize();
+  applyPageTone();
+  observeChromeHeights();
   updateOnlineStatus();
   await loadData();
   render();
-  if (!window.__DISABLE_SW_FOR_DEV__) setupServiceWorker();
+  // ?nosw skips the service worker, so development edits aren't served stale.
+  if (!location.search.includes("nosw")) setupServiceWorker();
 }
 
 init();

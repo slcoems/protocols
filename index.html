@@ -3,8 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" id="themeColor" content="#1d4ed8">
+<script>
+// Apply the saved theme and text size before first paint, so a dark-mode user
+// never sees a white flash. js/app.js keeps these in sync afterwards.
+(function () {
+  try {
+    var root = document.documentElement;
+    var get = function (k) { try { return localStorage.getItem("slco-protocols:" + k); } catch (e) { return null; } };
+    var pref = get("theme") || "system";
+    var dark = pref === "dark" || (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "dark" : "light");
+    root.setAttribute("data-page-tone", get("page-tone") || "dim");
+    var size = get("text-size");
+    root.style.fontSize = size === "xlarge" ? "150%" : size === "large" ? "125%" : "100%";
+    document.getElementById("themeColor").setAttribute("content", dark ? "#14213d" : "#1d4ed8");
+  } catch (e) {}
+})();
+</script>
 <title>SLCo EMS Protocols</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
@@ -16,93 +32,108 @@
 </head>
 <body>
 
+<a class="skip-link" href="#app">Skip to content</a>
+
 <header class="topbar" id="topbar">
   <button class="icon-btn" id="backBtn" aria-label="Back" hidden>
-    <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
   <h1 id="topTitle">SLCo EMS Protocols</h1>
-  <span class="icon-btn" aria-hidden="true" style="visibility:hidden"></span>
+  <span class="icon-btn spacer" aria-hidden="true"></span>
 </header>
 
-<div class="search-wrap" id="searchWrap">
+<div class="search-wrap" id="searchWrap" role="search">
   <div class="search-box">
-    <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    <input id="searchInput" type="search" inputmode="search" placeholder="Search protocols, drugs, doses…" autocomplete="off">
+    <svg class="search-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <input id="searchInput" type="search" inputmode="search" enterkeyhint="search" aria-label="Search protocols, medications and doses" placeholder="Search protocols, drugs, doses…" autocomplete="off">
     <button id="clearSearch" class="clear-btn" hidden aria-label="Clear search">&times;</button>
   </div>
 </div>
 
-<main id="app"></main>
+<main id="app" tabindex="-1"></main>
 
-<div class="viewer" id="viewer" hidden>
+<div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
+
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle" hidden>
   <div class="viewer-toolbar">
     <button class="icon-btn" id="viewerClose" aria-label="Close">
-      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
     </button>
-    <span class="viewer-title" id="viewerTitle"></span>
-    <button class="icon-btn" id="favBtn" aria-label="Toggle favorite">
-      <svg viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    <h2 class="viewer-title" id="viewerTitle"></h2>
+    <button class="icon-btn" id="favBtn" aria-label="Favorite this page" aria-pressed="false">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
     </button>
-  </div>
-  <div class="viewer-page-controls" style="justify-content:center; padding:0 10px 8px; background:var(--surface); border-bottom:1px solid var(--border);">
-    <button class="icon-btn small" id="prevPage" aria-label="Previous page">&lsaquo;</button>
-    <span id="pageIndicator">1 / 1</span>
-    <button class="icon-btn small" id="nextPage" aria-label="Next page">&rsaquo;</button>
   </div>
   <div class="viewer-video-bar" id="viewerVideoBar" hidden></div>
-  <div class="viewer-canvas-wrap" id="viewerCanvasWrap">
-    <canvas id="pdfCanvas"></canvas>
+  <section class="sr-only" id="pdfText" aria-label="Page text"></section>
+  <p class="viewer-status" id="viewerStatus" role="status" hidden></p>
+  <div class="viewer-canvas-wrap" id="viewerCanvasWrap" aria-busy="false">
+    <canvas id="pdfCanvas" aria-hidden="true"></canvas>
   </div>
-  <div class="viewer-zoom">
-    <button class="icon-btn small" id="zoomOut" aria-label="Zoom out">&minus;</button>
-    <span id="zoomIndicator">100%</span>
-    <button class="icon-btn small" id="zoomIn" aria-label="Zoom in">+</button>
+  <div class="viewer-dock" role="toolbar" aria-label="Page and zoom controls">
+    <div class="dock-group">
+      <button class="dock-btn" id="prevPage" aria-label="Previous page">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="dock-page" id="pageIndicator" role="status">1 / 1</span>
+      <button class="dock-btn" id="nextPage" aria-label="Next page">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="dock-group">
+      <button class="dock-btn" id="zoomOut" aria-label="Zoom out">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+      </button>
+      <span class="dock-zoom" id="zoomIndicator">100%</span>
+      <button class="dock-btn" id="zoomIn" aria-label="Zoom in">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
   </div>
 </div>
 
-<div class="player" id="player" hidden>
+<div class="player" id="player" role="dialog" aria-modal="true" aria-labelledby="playerTitle" hidden>
   <div class="viewer-toolbar">
     <button class="icon-btn" id="playerClose" aria-label="Close video">
-      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
     </button>
-    <span class="viewer-title" id="playerTitle"></span>
+    <h2 class="viewer-title" id="playerTitle"></h2>
     <button class="player-link" id="playerProtocol">Protocol</button>
   </div>
   <div class="player-stage">
     <video id="playerVideo" controls playsinline preload="metadata"></video>
   </div>
   <div class="player-footer">
-    <span class="player-offline" id="playerOffline"></span>
+    <span class="player-offline" id="playerOffline" role="status"></span>
     <button class="player-link" id="playerSave">Save for offline</button>
   </div>
 </div>
 
-<nav class="tabbar" id="tabbar">
-  <button class="tab-btn active" data-view="home">
-    <svg viewBox="0 0 24 24"><path d="M4 11.5L12 4l8 7.5M6 10v9h12v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<nav class="tabbar" id="tabbar" aria-label="Main">
+  <button class="tab-btn active" data-view="home" aria-current="page">
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 11.5L12 4l8 7.5M6 10v9h12v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     <span>Home</span>
   </button>
   <button class="tab-btn" data-view="favorites">
-    <svg viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4.5c1.7-2 5.7-2.3 7.8.5 2 2.7 1 6-1 8-2 2-4.8 4.3-6.8 6-2-1.7-4.8-4-6.8-6-2-2-3-5.3-1-8 2.1-2.8 6.1-2.5 7.8-.5z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
     <span>Favorites</span>
   </button>
   <button class="tab-btn" data-view="admin">
-    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span>Admin</span>
   </button>
   <button class="tab-btn" data-view="settings">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span>Settings</span>
   </button>
 </nav>
 
-<div class="offline-toast" id="offlineToast" hidden>You're offline — using cached protocols</div>
-<div class="update-toast" id="updateToast" hidden>
+<div class="offline-toast" id="offlineToast" role="status" hidden>You're offline — using cached protocols</div>
+<div class="update-toast" id="updateToast" role="status" hidden>
   <span>New content available</span>
   <button id="updateReload">Reload</button>
 </div>
 
-<script>if (location.search.includes("nosw")) window.__DISABLE_SW_FOR_DEV__ = true;</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
