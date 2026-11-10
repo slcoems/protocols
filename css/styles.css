@@ -231,6 +231,15 @@ main#app {
   line-height: 1.5;
 }
 
+.empty-state.tight { padding-bottom: 14px; }
+.search-note {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 14px 8px 0;
+}
+
 /* Search results */
 .search-result-page {
   font-size: 12px;
@@ -325,12 +334,17 @@ mark {
   flex: 1;
   overflow: auto;
   display: flex;
-  justify-content: center;
   padding: 12px;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y pinch-zoom;
 }
+/* Centred with auto margins, not justify-content: when the zoomed page is wider
+   than the screen, auto margins collapse to zero and it scrolls from its left
+   edge. justify-content: center instead pushes the overflow off the left edge,
+   where it can never be scrolled to. */
 #pdfCanvas {
+  flex: none;
+  margin: 0 auto;
   background: #fff;
   box-shadow: var(--shadow);
   max-width: none;

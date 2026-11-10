@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-23T01:23:30Z",
-  "sourceCheckedAt": "2026-09-23T01:23:22Z",
+  "generatedAt": "2026-11-10T18:25:18Z",
+  "sourceCheckedAt": "2026-11-09T15:58:40Z",
   "documents": {
     "district-bylaws": {
       "id": "district-bylaws",
@@ -67,6 +67,7 @@
     {
       "id": "general-patient-care-guidelines",
       "title": "General Patient Care Guidelines",
+      "page": 7,
       "protocols": [
         {
           "id": "general-patient-care-guidelines-airway-management",
@@ -139,6 +140,7 @@
     {
       "id": "cardiac-patient-care-guidelines",
       "title": "Cardiac Patient Care Guidelines",
+      "page": 30,
       "protocols": [
         {
           "id": "cardiac-patient-care-guidelines-bradycardia-symptomatic",
@@ -187,6 +189,7 @@
     {
       "id": "medical-patient-care-guidelines",
       "title": "Medical Patient Care Guidelines",
+      "page": 46,
       "protocols": [
         {
           "id": "medical-patient-care-guidelines-altitude-related-illnesses",
@@ -232,7 +235,7 @@
         },
         {
           "id": "medical-patient-care-guidelines-opioid-tricyclic-overdose",
-          "title": "OPIOID/TRICYCLIC Overdose",
+          "title": "Opioid/Tricyclic Overdose",
           "docId": "main-protocols",
           "page": 62
         },
@@ -289,6 +292,7 @@
     {
       "id": "avalanche-patient-care-guidelines",
       "title": "Avalanche Patient Care Guidelines",
+      "page": 79,
       "protocols": [
         {
           "id": "avalanche-patient-care-guidelines-avalanche-victim-management",
@@ -301,6 +305,7 @@
     {
       "id": "trauma-patient-care-guidelines",
       "title": "Trauma Patient Care Guidelines",
+      "page": 85,
       "protocols": [
         {
           "id": "trauma-patient-care-guidelines-guidelines-for-transport-of-trauma-patients-to-freestanding-emergency-departments-fsed",
@@ -355,26 +360,214 @@
     {
       "id": "appendix",
       "title": "Appendix",
+      "page": 104,
       "protocols": [
         {
           "id": "appendix-acetaminophen",
-          "title": "Acetaminophen / Adenosine / Albuterol / Amiodarone / Aspirin / Atropine / Blood Product / Calcium (Chloride or gluconate) / Diazepam / Diphenhydramine / Dextrose / Epinephrine",
+          "title": "Acetaminophen",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-adenosine",
+          "title": "Adenosine",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-albuterol",
+          "title": "Albuterol",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-amiodarone",
+          "title": "Amiodarone",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-aspirin",
+          "title": "Aspirin",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-atropine",
+          "title": "Atropine",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-blood-product",
+          "title": "Blood Product",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-calcium-chloride-or-gluconate",
+          "title": "Calcium (Chloride or gluconate)",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-dextrose",
+          "title": "Dextrose",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-diazepam",
+          "title": "Diazepam",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-diphenhydramine",
+          "title": "Diphenhydramine",
+          "docId": "main-protocols",
+          "page": 106
+        },
+        {
+          "id": "appendix-epinephrine",
+          "title": "Epinephrine",
           "docId": "main-protocols",
           "page": 106
         },
         {
           "id": "appendix-fentanyl",
-          "title": "Fentanyl / Glucagon / Glucose (Oral) / Haloperidol / Hydroxocobalamin / Ibuprofen / Ipratropium / Ketamine / Ketorolac / Lidocaine / Lorazepam / Magnesium Sulfate / Morphine",
+          "title": "Fentanyl",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-glucagon",
+          "title": "Glucagon",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-glucose-oral",
+          "title": "Glucose (Oral)",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-haloperidol",
+          "title": "Haloperidol",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-hydroxocobalamin",
+          "title": "Hydroxocobalamin",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-ibuprofen",
+          "title": "Ibuprofen",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-ipratropium",
+          "title": "Ipratropium",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-ketamine",
+          "title": "Ketamine",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-ketorolac",
+          "title": "Ketorolac",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-lidocaine",
+          "title": "Lidocaine",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-lorazepam",
+          "title": "Lorazepam",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-magnesium-sulfate",
+          "title": "Magnesium Sulfate",
           "docId": "main-protocols",
           "page": 107
         },
         {
           "id": "appendix-midazolam",
-          "title": "Midazolam / Naloxone / Nitroglycerin / Norepinephrine / Ondansetron / Oxytocin (Pitocin) / Promethazine / Sodium Bicarbonate / Tranexamic Acid (TXA)",
+          "title": "Midazolam",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-morphine",
+          "title": "Morphine",
+          "docId": "main-protocols",
+          "page": 107
+        },
+        {
+          "id": "appendix-naloxone",
+          "title": "Naloxone",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-nitroglycerin",
+          "title": "Nitroglycerin",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-norepinephrine",
+          "title": "Norepinephrine",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-ondansetron",
+          "title": "Ondansetron",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-oxytocin-pitocin",
+          "title": "Oxytocin (Pitocin)",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-promethazine",
+          "title": "Promethazine",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-sodium-bicarbonate",
+          "title": "Sodium Bicarbonate",
+          "docId": "main-protocols",
+          "page": 108
+        },
+        {
+          "id": "appendix-tranexamic-acid-txa",
+          "title": "Tranexamic Acid (TXA)",
           "docId": "main-protocols",
           "page": 108
         }
-      ]
+      ],
+      "noun": "medication"
     }
   ],
   "reference": [

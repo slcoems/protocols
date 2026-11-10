@@ -100,6 +100,9 @@ async function loadData() {
   ]);
   state.protocols = await protocolsRes.json();
   state.searchIndex = await searchRes.json();
+  // Lower-case each page once; search runs on every keystroke.
+  for (const pg of state.searchIndex) pg.lower = pg.text.toLowerCase();
+  buildPageContext();
   // Videos need the player markup; if this page is an older index.html,
   // leave them out rather than break the app.
   try {
@@ -222,7 +225,7 @@ function renderHome() {
   html += p.clinicalCategories.map((cat) => `
     <button class="row-btn" data-nav="category" data-cat="${cat.id}">
       <span class="category-icon">${CATEGORY_ICONS[cat.id] || "📋"}</span>
-      <span class="row-title">${escapeHtml(cat.title)}<div class="row-sub">${cat.protocols.length} protocol${cat.protocols.length === 1 ? "" : "s"}</div></span>
+      <span class="row-title">${escapeHtml(cat.title)}<div class="row-sub">${cat.protocols.length} ${cat.noun || "protocol"}${cat.protocols.length === 1 ? "" : "s"}</div></span>
       <span class="row-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`).join("");
   html += `</div>`;
@@ -334,80 +337,273 @@ function renderSettings() {
   document.getElementById("downloadAllBtn").addEventListener("click", downloadAllForOffline);
 }
 
+// ---------- Search ----------
+
+// Names medics say on the radio that the protocol book doesn't print. Each maps
+// to the generic name the book's medication appendix uses.
+const SYNONYMS = {
+  adrenaline: ["epinephrine"],
+  narcan: ["naloxone"],
+  versed: ["midazolam"],
+  ntg: ["nitroglycerin"],
+  toradol: ["ketorolac"],
+  zofran: ["ondansetron"],
+  ativan: ["lorazepam"],
+  valium: ["diazepam"],
+  benadryl: ["diphenhydramine"],
+  haldol: ["haloperidol"],
+  tylenol: ["acetaminophen"],
+  motrin: ["ibuprofen"],
+  advil: ["ibuprofen"],
+  ketalar: ["ketamine"],
+  cordarone: ["amiodarone"],
+  pacerone: ["amiodarone"],
+  adenocard: ["adenosine"],
+  phenergan: ["promethazine"],
+};
+
+const MAX_TEXT_RESULTS = 40;
+
+// A number followed by a dose unit: "1 mg", "0.01 mg/kg", "300 mL", "50 joules".
+const DOSE_RE = /\d(?:\.\d+)?\s?(?:mg|mcg|µg|ug|g|ml|l|units?|iu|meq|joules?|j|%)(?![a-z])/;
+
+// One group per typed word; a text matches a group when any alternative (the
+// word or a synonym) starts a word in it. "epi" finds epinephrine but not "recipe".
+function parseQuery(raw) {
+  return raw.toLowerCase().split(/\s+/).filter(Boolean).map((word) => {
+    const alts = [word, ...(SYNONYMS[word] || [])];
+    return { word, alts, re: new RegExp(`(?:^|[^a-z0-9])(?:${alts.map(escapeRegex).join("|")})`, "g") };
+  });
+}
+
+// The book's bookmarks only mark where a protocol starts, so a search hit on
+// page 26 would otherwise be labelled with the whole book's name. Build a page
+// -> protocol lookup from the same data the category lists use.
+function buildPageContext() {
+  const p = state.protocols;
+  const byDoc = new Map();
+  const add = (docId, item) => {
+    if (!byDoc.has(docId)) byDoc.set(docId, []);
+    byDoc.get(docId).push(item);
+  };
+  const entryGroup = new Map(); // entry id -> section name shown under title matches
+  for (const cat of p.clinicalCategories) {
+    const docId = cat.protocols[0]?.docId;
+    if (!docId) continue;
+    if (cat.page) add(docId, { page: cat.page, kind: 1, title: cat.title, category: cat.title, noun: cat.noun });
+    for (const pr of cat.protocols) {
+      add(docId, { page: pr.page, kind: 2, title: pr.title, category: cat.title, noun: cat.noun });
+      entryGroup.set(pr.id, cat.title);
+    }
+  }
+  for (const r of p.reference) {
+    add(r.docId, { page: r.page, kind: 0, title: r.title, category: "Reference" });
+    entryGroup.set(r.id, "Reference");
+  }
+  for (const a of p.administrative) entryGroup.set(a.id, "Administrative");
+  for (const v of p.departmentVariances || []) entryGroup.set(v.id, "Department variance");
+  for (const list of byDoc.values()) list.sort((a, b) => a.page - b.page || a.kind - b.kind);
+  state.pageContext = byDoc;
+  state.entryGroup = entryGroup;
+}
+
+// { title, category } for the protocol a page belongs to.
+function contextForPage(docId, page) {
+  const list = state.pageContext?.get(docId);
+  let last = -1;
+  if (list) for (let i = 0; i < list.length && list[i].page <= page; i++) last = i;
+  if (last < 0) return { title: docTitle(docId), category: null };
+  const startsHere = list.filter((x) => x.page === list[last].page);
+  const protocols = startsHere.filter((x) => x.kind === 2);
+  if (protocols.length === 1) return { title: protocols[0].title, category: protocols[0].category };
+  if (protocols.length > 1) {
+    // Several items share the page (the medication appendix): name the list.
+    const { category, noun } = protocols[0];
+    return { title: noun ? `${category} · ${noun}s` : category, category: null };
+  }
+  return { title: startsHere[0].title, category: startsHere[0].category };
+}
+
+function runSearch(raw) {
+  const groups = parseQuery(raw);
+  const matches = (text) => groups.every((g) => text.search(g.re) !== -1);
+  const q = raw.toLowerCase();
+
+  const rankTitle = (e) => {
+    const t = e.title.toLowerCase();
+    return t === q ? 0 : t.startsWith(q) ? 1 : 2;
+  };
+  const titleMatches = allNavEntries().filter((e) => matches(e.title.toLowerCase())).sort((a, b) => rankTitle(a) - rankTitle(b));
+  const titleKeys = new Set(titleMatches.map((e) => `${e.docId}#${e.page}`));
+
+  const textMatches = [];
+  for (const pg of state.searchIndex) {
+    if (!matches(pg.lower) || titleKeys.has(`${pg.docId}#${pg.page}`)) continue;
+    const ctx = contextForPage(pg.docId, pg.page);
+    let score = 0;
+    let first = Infinity;
+    for (const g of groups) {
+      score += Math.min(pg.lower.match(g.re).length, 5); // how much the page is about it
+      first = Math.min(first, pg.lower.search(g.re));
+    }
+    if (matches(ctx.title.toLowerCase())) score += 4; // the page sits in a protocol named for the query
+    if (first < 160) score += 2; // the match is in the page's header
+    if (DOSE_RE.test(pg.lower.slice(Math.max(0, first - 80), first + 120))) score += 3; // it sits beside a dose
+    textMatches.push({ pg, ctx, score });
+  }
+  textMatches.sort((a, b) => b.score - a.score || a.pg.page - b.pg.page);
+
+  const videoMatches = state.videos.filter((v) =>
+    matches([v.title, v.summary, ...(v.keywords || [])].join(" ").toLowerCase()));
+
+  return { groups, videoMatches, titleMatches, textMatches };
+}
+
+function textHitRowHTML({ pg, ctx }, groups) {
+  return `
+    <button class="row-btn" data-doc="${pg.docId}" data-page="${pg.page}" data-title="${escapeAttr(ctx.title)}">
+      <span class="row-title">${escapeHtml(ctx.title)}<div class="search-snippet">${buildSnippet(pg.text, groups)}</div></span>
+      <span class="search-result-page">p.${pg.page}</span>
+    </button>`;
+}
+
 function renderSearchResults() {
-  const q = state.query.trim().toLowerCase();
-  if (q.length < 2) {
+  const raw = state.query.trim();
+  if (raw.length < 2) {
     el.app.innerHTML = `<div class="empty-state">Keep typing to search…</div>`;
     return;
   }
-  const words = q.split(/\s+/).filter(Boolean);
-  const navByKey = new Map(allNavEntries().map((e) => [`${e.docId}#${e.page}`, e]));
-
-  const titleMatches = [];
-  const textMatches = [];
-
-  for (const entry of allNavEntries()) {
-    if (entry.title.toLowerCase().includes(q)) titleMatches.push(entry);
-  }
-
-  for (const page of state.searchIndex) {
-    const lower = page.text.toLowerCase();
-    if (!words.every((w) => lower.includes(w))) continue;
-    const key = `${page.docId}#${page.page}`;
-    if (titleMatches.some((t) => `${t.docId}#${t.page}` === key)) continue;
-    textMatches.push(page);
-  }
-
-  const videoMatches = state.videos.filter((v) => {
-    const hay = [v.title, v.summary, ...(v.keywords || [])].join(" ").toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
-
-  const total = videoMatches.length + titleMatches.length + textMatches.length;
-  if (!total) {
-    el.app.innerHTML = `<div class="empty-state">No results for "${escapeHtml(state.query)}"</div>`;
+  const { groups, videoMatches, titleMatches, textMatches } = runSearch(raw);
+  if (!videoMatches.length && !titleMatches.length && !textMatches.length) {
+    renderNoResults(raw);
     return;
   }
 
-  let html = `<div class="card-list">`;
-  html += videoMatches.map((v) => videoRowHTML(v)).join("");
-  html += titleMatches.map((entry) => rowHTML(entry)).join("");
-  html += textMatches.slice(0, 40).map((page) => {
-    const entry = navByKey.get(`${page.docId}#${page.page}`) || {
-      docId: page.docId, page: page.page, title: docTitle(page.docId),
-    };
-    const snippet = buildSnippet(page.text, words);
-    return `
-      <button class="row-btn" data-doc="${entry.docId}" data-page="${entry.page}" data-title="${escapeAttr(entry.title)}">
-        <span class="row-title">${escapeHtml(entry.title)}<div class="search-snippet">${snippet}</div></span>
-        <span class="search-result-page">p.${entry.page}</span>
-      </button>`;
-  }).join("");
-  html += `</div>`;
+  let html = "";
+  const top = videoMatches.length + titleMatches.length;
+  if (top) {
+    html += `<div class="card-list">`;
+    html += videoMatches.map((v) => videoRowHTML(v)).join("");
+    html += titleMatches.map((e) => rowHTML(e, { showSub: state.entryGroup?.get(e.id) })).join("");
+    html += `</div>`;
+  }
+  if (textMatches.length) {
+    const n = textMatches.length;
+    html += `<div class="section-title">${top ? "Also mentioned" : "Mentioned"} on ${n} page${n === 1 ? "" : "s"}</div>`;
+    html += `<div class="card-list">${textMatches.slice(0, MAX_TEXT_RESULTS).map((m) => textHitRowHTML(m, groups)).join("")}</div>`;
+    if (n > MAX_TEXT_RESULTS) {
+      html += `<div class="search-note">Showing the ${MAX_TEXT_RESULTS} best matches of ${n}. Add a word to narrow it down.</div>`;
+    }
+  }
   el.app.innerHTML = html;
+}
+
+function renderNoResults(raw) {
+  const fix = suggestCorrection(raw);
+  let html = `<div class="empty-state${fix ? " tight" : ""}">No results for “${escapeHtml(raw)}”</div>`;
+  if (fix) {
+    html += `<div class="card-list"><button class="row-btn" data-suggest="${escapeAttr(fix)}">
+      <span class="row-title">Did you mean <strong>${escapeHtml(fix)}</strong>?</span>
+    </button></div>`;
+  }
+  el.app.innerHTML = html;
+}
+
+// Every word the book uses, with how often, for spelling suggestions.
+function vocabulary() {
+  if (state.vocab) return state.vocab;
+  const counts = new Map();
+  const tally = (text) => {
+    for (const w of text.match(/[a-z][a-z-]{3,}/g) || []) counts.set(w, (counts.get(w) || 0) + 1);
+  };
+  for (const pg of state.searchIndex) tally(pg.lower);
+  for (const e of allNavEntries()) tally(e.title.toLowerCase());
+  state.vocab = counts;
+  return counts;
+}
+
+// Optimal-string-alignment distance (one swap of neighbours counts as one edit),
+// giving up once it must exceed `max`.
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2 = null;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// "epinefrine" -> "epinephrine". Only ever offered, never applied silently: a
+// misread dose search is worse than an honest "no results".
+function suggestCorrection(raw) {
+  const vocab = vocabulary();
+  const words = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  let changed = false;
+  const fixed = words.map((w) => {
+    if (w.length < 4 || SYNONYMS[w]) return w;
+    for (const known of vocab.keys()) if (known.startsWith(w)) return w; // already a real word-start
+    const max = w.length <= 5 ? 1 : 2;
+    let best = null;
+    let bestD = Infinity;
+    let bestN = 0;
+    for (const [cand, n] of vocab) {
+      const d = editDistance(w, cand, max);
+      if (d <= max && (d < bestD || (d === bestD && n > bestN))) {
+        best = cand;
+        bestD = d;
+        bestN = n;
+      }
+    }
+    if (!best) return w;
+    changed = true;
+    return best;
+  });
+  if (!changed) return null;
+  const suggestion = fixed.join(" ");
+  const r = runSearch(suggestion);
+  return r.videoMatches.length || r.titleMatches.length || r.textMatches.length ? suggestion : null;
 }
 
 function docTitle(docId) {
   return state.protocols?.documents?.[docId]?.title || docId;
 }
 
-function buildSnippet(text, words) {
+// A window of the page text around the first hit, with every hit marked. Text is
+// escaped piece by piece so a marked term can never split an HTML entity.
+function buildSnippet(text, groups) {
   const lower = text.toLowerCase();
   let idx = -1;
-  for (const w of words) {
-    idx = lower.indexOf(w);
-    if (idx !== -1) break;
+  for (const g of groups) {
+    const i = lower.search(g.re);
+    if (i !== -1 && (idx === -1 || i < idx)) idx = i;
   }
   if (idx === -1) idx = 0;
   const start = Math.max(0, idx - 40);
   const end = Math.min(text.length, idx + 120);
-  let snippet = (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
-  snippet = escapeHtml(snippet);
-  for (const w of words) {
-    const re = new RegExp(`(${escapeRegex(w)})`, "ig");
-    snippet = snippet.replace(re, "<mark>$1</mark>");
+  const raw = text.slice(start, end);
+  const terms = groups.flatMap((g) => g.alts).map(escapeRegex).join("|");
+  const re = new RegExp(`(^|[^A-Za-z0-9])(${terms})`, "gi");
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(raw))) {
+    const at = m.index + m[1].length;
+    out += escapeHtml(raw.slice(last, at)) + `<mark>${escapeHtml(m[2])}</mark>`;
+    last = at + m[2].length;
   }
-  return snippet;
+  out += escapeHtml(raw.slice(last));
+  return (start > 0 ? "…" : "") + out + (end < text.length ? "…" : "");
 }
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -440,6 +636,12 @@ function applyNav(target, push = true) {
 }
 
 el.app.addEventListener("click", (e) => {
+  const suggestBtn = e.target.closest("[data-suggest]");
+  if (suggestBtn) {
+    el.searchInput.value = suggestBtn.dataset.suggest;
+    el.searchInput.dispatchEvent(new Event("input"));
+    return;
+  }
   const navBtn = e.target.closest("[data-nav='category']");
   if (navBtn) {
     applyNav({ type: "category", catId: navBtn.dataset.cat });
@@ -503,15 +705,57 @@ async function openViewer(docId, page, title) {
   try {
     const doc = await getPdfDoc(docId);
     state.viewer.numPages = doc.numPages;
-    await renderPage();
+    await renderPage("open");
   } catch (err) {
     console.error("Failed to open PDF", err);
     el.canvasWrap.innerHTML = `<div class="empty-state" style="color:var(--text)">Couldn't load this document. If you're offline, download it first from Settings.</div>`;
   }
 }
 
-async function renderPage() {
-  if (state.viewer.rendering) return;
+// What the viewer was asked to do decides where the page should sit afterwards:
+//   open: a new document starts at its top-left
+//   page: a new page starts at its top, keeping the zoomed-in column position
+//   zoom: the same spot stays in the middle of the screen (also used on rotate)
+// A request that arrives mid-render is remembered, not dropped, and runs with
+// the latest page and zoom as soon as the current one finishes.
+const RENDER_RANK = { zoom: 0, page: 1, open: 2 };
+let queuedRender = null;
+
+function captureAnchor() {
+  const w = el.canvasWrap.getBoundingClientRect();
+  const c = el.pdfCanvas.getBoundingClientRect();
+  if (!c.width || !c.height) return null;
+  const clamp = (n) => Math.min(1, Math.max(0, n));
+  return {
+    fx: clamp((w.left + el.canvasWrap.clientWidth / 2 - c.left) / c.width),
+    fy: clamp((w.top + el.canvasWrap.clientHeight / 2 - c.top) / c.height),
+  };
+}
+
+function restoreScroll(mode, anchor) {
+  const wrap = el.canvasWrap;
+  if (mode === "open") {
+    wrap.scrollLeft = 0;
+    wrap.scrollTop = 0;
+  } else if (mode === "page") {
+    wrap.scrollTop = 0;
+  } else if (anchor) {
+    const w = wrap.getBoundingClientRect();
+    const c = el.pdfCanvas.getBoundingClientRect();
+    wrap.scrollLeft += c.left - w.left - (wrap.clientWidth / 2 - anchor.fx * c.width);
+    wrap.scrollTop += c.top - w.top - (wrap.clientHeight / 2 - anchor.fy * c.height);
+  }
+}
+
+// iOS Safari silently drops canvases above ~16.7 million pixels, which a large
+// zoom on a high-density tablet would otherwise reach.
+const MAX_CANVAS_PIXELS = 16e6;
+
+async function renderPage(mode = "page") {
+  if (state.viewer.rendering) {
+    if (!queuedRender || RENDER_RANK[mode] > RENDER_RANK[queuedRender]) queuedRender = mode;
+    return;
+  }
   state.viewer.rendering = true;
   try {
     const doc = await getPdfDoc(state.viewer.docId);
@@ -529,13 +773,18 @@ async function renderPage() {
     const cssScale = baseScale * state.viewer.zoom;
     const dpr = window.devicePixelRatio || 1;
 
-    const renderViewport = page.getViewport({ scale: cssScale * dpr });
+    let renderScale = cssScale * dpr;
+    const pixels = unscaledViewport.width * unscaledViewport.height * renderScale * renderScale;
+    if (pixels > MAX_CANVAS_PIXELS) renderScale *= Math.sqrt(MAX_CANVAS_PIXELS / pixels);
+    const renderViewport = page.getViewport({ scale: renderScale });
     const canvas = el.pdfCanvas;
     const ctx = canvas.getContext("2d");
+    const anchor = mode === "zoom" ? captureAnchor() : null; // measured before the canvas changes size
     canvas.width = renderViewport.width;
     canvas.height = renderViewport.height;
     canvas.style.width = `${cssScale * unscaledViewport.width}px`;
     canvas.style.height = `${cssScale * unscaledViewport.height}px`;
+    restoreScroll(mode, anchor);
     await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
     el.pageIndicator.textContent = `${pageNum} / ${doc.numPages}`;
     el.zoomIndicator.textContent = `${Math.round(state.viewer.zoom * 100)}%`;
@@ -543,6 +792,11 @@ async function renderPage() {
     updateVideoBar();
   } finally {
     state.viewer.rendering = false;
+    if (queuedRender) {
+      const next = queuedRender;
+      queuedRender = null;
+      renderPage(next).catch((err) => console.error("PDF render failed", err));
+    }
   }
 }
 
@@ -569,19 +823,19 @@ function closeViewer() {
 
 el.prevPage.addEventListener("click", () => {
   state.viewer.page = Math.max(1, state.viewer.page - 1);
-  renderPage();
+  renderPage("page");
 });
 el.nextPage.addEventListener("click", () => {
   state.viewer.page = Math.min(state.viewer.numPages, state.viewer.page + 1);
-  renderPage();
+  renderPage("page");
 });
 el.zoomIn.addEventListener("click", () => {
   state.viewer.zoom = Math.min(3, state.viewer.zoom + 0.25);
-  renderPage();
+  renderPage("zoom");
 });
 el.zoomOut.addEventListener("click", () => {
   state.viewer.zoom = Math.max(0.5, state.viewer.zoom - 0.25);
-  renderPage();
+  renderPage("zoom");
 });
 
 // Swipe left/right to change page on the canvas area
@@ -779,7 +1033,7 @@ async function downloadAllForOffline() {
 }
 
 window.addEventListener("resize", () => {
-  if (!el.viewer.hidden) renderPage();
+  if (!el.viewer.hidden) renderPage("zoom");
 });
 
 // ---------- Network status ----------
