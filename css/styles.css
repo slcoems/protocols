@@ -83,6 +83,15 @@ body {
 
 button { font-family: inherit; cursor: pointer; }
 
+/* Drawn icons: one stroke weight everywhere, in the current text color. */
+.ic {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Keyboard focus: one visible ring, themed. Rows sit in overflow:hidden cards,
    so their ring is drawn inside. */
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -299,8 +308,8 @@ main#app {
   justify-content: center;
   flex-shrink: 0;
   color: var(--accent);
-  font-size: 1.125rem;
 }
+.category-icon svg { width: 22px; height: 22px; }
 
 .empty-state {
   text-align: center;

@@ -108,13 +108,32 @@ function announce(message, delay = 0) {
   }, delay);
 }
 
+// Line icons on a 24px grid: 2px stroke, round caps and joins, no fills, drawn in
+// currentColor (the .ic class in the stylesheet supplies the stroke).
+const ICON_PATHS = {
+  general: `<path d="M6 3v5a4 4 0 0 0 8 0V3"/><path d="M5 3h2M13 3h2"/><path d="M10 12v2.5a4.5 4.5 0 0 0 9 0V13"/><circle cx="19" cy="11" r="2"/>`,
+  cardiac: `<path d="M2 12h4.5l2.5-7 4 14 2.5-7H22"/>`, // an ECG trace: the heart already means Favorites
+  medical: `<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M12 11.5v5M9.5 14h5"/>`,
+  trauma: `<rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-45 12 12)"/><path d="M9.8 8.5v7M14.2 8.5v7" transform="rotate(-45 12 12)"/>`,
+  avalanche: `<path d="M2 19l7-12 4 7 2.5-4L22 19z"/><path d="M6.7 11l2.3 2 2.3-2"/>`,
+  meds: `<path d="M8 3h8"/><path d="M9 3v3.5L7.5 9v10a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2V9L15 6.5V3"/><path d="M7.5 13h9"/>`,
+  reference: `<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>`,
+  admin: `<path d="M9 5H7a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/>`,
+  ambulance: `<path d="M2 17V7h11v10"/><path d="M13 10h4.5l3.5 3.5V17"/><path d="M2 17h3M9 17h6M19 17h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M7.5 9.5v4M5.5 11.5h4"/>`,
+  play: `<path d="M8 5.5v13l11-6.5z"/>`,
+};
+
+function iconSVG(name, className = "ic") {
+  return `<svg class="${className}" aria-hidden="true" viewBox="0 0 24 24">${ICON_PATHS[name]}</svg>`;
+}
+
 const CATEGORY_ICONS = {
-  "general-patient-care-guidelines": "🩺",
-  "cardiac-patient-care-guidelines": "❤️",
-  "medical-patient-care-guidelines": "💊",
-  "avalanche-patient-care-guidelines": "🏔️",
-  "trauma-patient-care-guidelines": "🩹",
-  "appendix": "💉",
+  "general-patient-care-guidelines": "general",
+  "cardiac-patient-care-guidelines": "cardiac",
+  "medical-patient-care-guidelines": "medical",
+  "avalanche-patient-care-guidelines": "avalanche",
+  "trauma-patient-care-guidelines": "trauma",
+  "appendix": "meds",
 };
 
 function loadFavorites() {
@@ -258,7 +277,7 @@ function videoRowHTML(v) {
   const saved = state.savedVideos.has(v.id) ? " · Saved offline" : "";
   return `
     <button class="row-btn" data-video="${escapeAttr(v.id)}">
-      <span class="category-icon" aria-hidden="true"><svg class="play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+      <span class="category-icon" aria-hidden="true"><svg class="ic play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
       <span class="row-title">${escapeHtml(v.title)}<div class="row-sub">${formatDuration(v.durationSec)} · ${escapeHtml(v.scope)}${saved}</div></span>
       <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>`;
@@ -285,7 +304,7 @@ function categoryLabel(cat) {
 // A category row. A category with a single protocol opens that protocol
 // directly: no list with one item in the way.
 function categoryRowHTML(cat) {
-  const icon = CATEGORY_ICONS[cat.id] || "📋";
+  const icon = iconSVG(CATEGORY_ICONS[cat.id] || "reference"); // an unrecognized new category gets the document icon
   const n = cat.protocols.length;
   if (!cat.noun && n === 1) {
     const pr = cat.protocols[0];
@@ -311,7 +330,7 @@ function videosRowHTML() {
   const vs = state.videos;
   return `
     <button class="row-btn" data-nav="videos">
-      <span class="category-icon" aria-hidden="true"><svg class="play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+      <span class="category-icon" aria-hidden="true"><svg class="ic play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
       <span class="row-title">Procedure videos<div class="row-sub clamp">${vs.length} short ${vs.length === 1 ? "video" : "videos"}: ${escapeHtml(vs.map((v) => v.title).join(", "))}</div></span>
       ${CHEVRON_HTML}
     </button>`;
@@ -335,7 +354,7 @@ function renderHome() {
   html += group("Recently viewed", recents.map((r) => pageRowHTML(r.docId, r.page, r.title)));
   html += group("Quick lookup", [...lookups.map(categoryRowHTML), ...(state.videos.length ? [videosRowHTML()] : [])]);
   html += group("Clinical Protocols", protocols.map(categoryRowHTML));
-  html += group("Reference", p.reference.map((r) => rowHTML(r, { icon: "📄" })));
+  html += group("Reference", p.reference.map((r) => rowHTML(r, { icon: iconSVG("reference") })));
   el.app.innerHTML = html;
 }
 
@@ -389,11 +408,11 @@ function favoriteRowHTML(key) {
 function renderAdmin() {
   const p = state.protocols;
   let html = `<h2 class="section-title">Administrative & Operational</h2><div class="card-list">${
-    p.administrative.map((a) => rowHTML(a, { icon: "📋" })).join("")
+    p.administrative.map((a) => rowHTML(a, { icon: iconSVG("admin") })).join("")
   }</div>`;
   if (p.departmentVariances && p.departmentVariances.length) {
     html += `<h2 class="section-title">Department Variances</h2><div class="card-list">${
-      p.departmentVariances.map((v) => rowHTML(v, { icon: "🚑" })).join("")
+      p.departmentVariances.map((v) => rowHTML(v, { icon: iconSVG("ambulance") })).join("")
     }</div>`;
   }
   el.app.innerHTML = html;
@@ -1343,7 +1362,7 @@ function updateVideoBar() {
     bar.innerHTML = "";
     return;
   }
-  const play = `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>`;
+  const play = iconSVG("play");
   const link = (v, label) => `<button class="viewer-video-link" data-video="${escapeAttr(v.id)}">${play}<span>${label}<span class="video-len"> (${formatDuration(v.durationSec)})</span></span></button>`;
   if (vs.length === 1) {
     bar.innerHTML = link(vs[0], `Watch: ${escapeHtml(vs[0].title)}`);
