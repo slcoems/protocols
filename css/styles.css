@@ -674,11 +674,14 @@ mark {
   margin: 4px 14px 10px;
 }
 .progress-bar[hidden] { display: none; }
+/* Scaled, not resized: animating transform skips layout. */
 .progress-bar-fill {
   height: 100%;
+  width: 100%;
   background: var(--accent-solid);
-  width: 0%;
-  transition: width 0.2s;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.2s;
 }
 
 /* A phone held sideways has ~375px of height: give the page the room. Targets

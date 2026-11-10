@@ -1303,7 +1303,7 @@ async function downloadAllForOffline() {
   barEl.hidden = false;
   const progress = (done) => {
     const pct = Math.round((done / files.length) * 100);
-    fillEl.style.width = `${pct}%`;
+    fillEl.style.transform = `scaleX(${done / files.length})`;
     barEl.setAttribute("aria-valuenow", String(pct));
     statusEl.textContent = `Downloading ${done}/${files.length}…`;
   };
