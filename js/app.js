@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   textSize: "slco-protocols:text-size",
   pageTone: "slco-protocols:page-tone",
   zoom: "slco-protocols:zoom",
+  recent: "slco-protocols:recent",
 };
 
 // localStorage throws in some private-browsing modes. Preferences are a
@@ -38,6 +39,7 @@ const state = {
   view: "home",
   query: "",
   favorites: loadFavorites(),
+  recent: loadRecent(), // [{ docId, page, title }], newest first
   pdfDocs: new Map(), // docId -> pdfjs document proxy
   viewer: {
     docId: null,
@@ -117,6 +119,22 @@ function loadFavorites() {
 
 function saveFavorites() {
   store.set(STORAGE_KEYS.favorites, JSON.stringify([...state.favorites]));
+}
+
+function loadRecent() {
+  try {
+    return JSON.parse(store.get(STORAGE_KEYS.recent) || "[]").filter((r) => r && typeof r.docId === "string" && Number.isInteger(r.page));
+  } catch {
+    return [];
+  }
+}
+
+// Newest first, one entry per protocol: reopening one moves it to the top and
+// keeps the page the reader was last on.
+function rememberRecent(docId, page, title) {
+  const same = (r) => r.docId === docId && r.title === title;
+  state.recent = [{ docId, page, title }, ...state.recent.filter((r) => !same(r))].slice(0, 4);
+  store.set(STORAGE_KEYS.recent, JSON.stringify(state.recent));
 }
 
 function loadZoom() {
@@ -249,39 +267,84 @@ function formatUpdatedDate(iso) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
+const CHEVRON_HTML = `<span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+
+// "Appendix" is the county's word; a medic looks for "Medications".
+function categoryLabel(cat) {
+  return cat.noun ? `${cat.noun[0].toUpperCase()}${cat.noun.slice(1)}s` : cat.title;
+}
+
+// A category row. A category with a single protocol opens that protocol
+// directly: no list with one item in the way.
+function categoryRowHTML(cat) {
+  const icon = CATEGORY_ICONS[cat.id] || "📋";
+  const n = cat.protocols.length;
+  if (!cat.noun && n === 1) {
+    const pr = cat.protocols[0];
+    return `
+    <button class="row-btn" data-doc="${escapeAttr(pr.docId)}" data-page="${pr.page}" data-title="${escapeAttr(pr.title)}">
+      <span class="category-icon" aria-hidden="true">${icon}</span>
+      <span class="row-title">${escapeHtml(cat.title)}<div class="row-sub">${escapeHtml(pr.title)}</div></span>
+      ${state.favorites.has(favKey(pr.docId, pr.page)) ? favStarHTML() : ""}
+      ${CHEVRON_HTML}
+    </button>`;
+  }
+  const sub = cat.noun ? `Appendix · ${n} ${cat.noun}s, A–Z` : `${n} protocols`;
+  return `
+    <button class="row-btn" data-nav="category" data-cat="${cat.id}">
+      <span class="category-icon" aria-hidden="true">${icon}</span>
+      <span class="row-title">${escapeHtml(categoryLabel(cat))}<div class="row-sub">${sub}</div></span>
+      ${CHEVRON_HTML}
+    </button>`;
+}
+
+// One row, however many videos there are, so Home doesn't grow with the library.
+function videosRowHTML() {
+  const vs = state.videos;
+  return `
+    <button class="row-btn" data-nav="videos">
+      <span class="category-icon" aria-hidden="true"><svg class="play-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+      <span class="row-title">Procedure videos<div class="row-sub clamp">${vs.length} short ${vs.length === 1 ? "video" : "videos"}: ${escapeHtml(vs.map((v) => v.title).join(", "))}</div></span>
+      ${CHEVRON_HTML}
+    </button>`;
+}
+
+// Reading order follows the task: resume what you were reading, look up a drug
+// or a procedure, browse protocols by type, then the reference documents.
 function renderHome() {
   const p = state.protocols;
+  const cats = p.clinicalCategories;
+  const lookups = cats.filter((c) => c.noun);
+  const protocols = [
+    ...cats.filter((c) => !c.noun && c.protocols.length > 1),
+    ...cats.filter((c) => !c.noun && c.protocols.length === 1), // one-protocol categories last
+  ];
+  const recents = state.recent.filter((r) => p.documents[r.docId]).slice(0, 3);
+  const group = (title, rows) => (rows.length ? `<h2 class="section-title">${title}</h2><div class="card-list">${rows.join("")}</div>` : "");
+
   const updated = formatUpdatedDate(p.sourceCheckedAt || p.generatedAt);
   let html = updated ? `<div class="updated-line">Updated ${updated}</div>` : "";
-  html += `<h2 class="section-title">Clinical Protocols</h2><div class="card-list">`;
-  html += p.clinicalCategories.map((cat) => `
-    <button class="row-btn" data-nav="category" data-cat="${cat.id}">
-      <span class="category-icon" aria-hidden="true">${CATEGORY_ICONS[cat.id] || "📋"}</span>
-      <span class="row-title">${escapeHtml(cat.title)}<div class="row-sub">${cat.protocols.length} ${cat.noun || "protocol"}${cat.protocols.length === 1 ? "" : "s"}</div></span>
-      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-    </button>`).join("");
-  html += `</div>`;
-
-  if (state.videos.length) {
-    html += `<h2 class="section-title">Procedure Videos</h2><div class="card-list">`;
-    html += state.videos.map((v) => videoRowHTML(v)).join("");
-    html += `</div>`;
-  }
-
-  html += `<h2 class="section-title">Reference</h2><div class="card-list">`;
-  html += p.reference.map((r) => rowHTML(r, { icon: "📄" })).join("");
-  html += `</div>`;
-
+  html += group("Recently viewed", recents.map((r) => pageRowHTML(r.docId, r.page, r.title)));
+  html += group("Quick lookup", [...lookups.map(categoryRowHTML), ...(state.videos.length ? [videosRowHTML()] : [])]);
+  html += group("Clinical Protocols", protocols.map(categoryRowHTML));
+  html += group("Reference", p.reference.map((r) => rowHTML(r, { icon: "📄" })));
   el.app.innerHTML = html;
+}
+
+function renderVideos() {
+  el.app.innerHTML = `<div class="card-list">${state.videos.map(videoRowHTML).join("")}</div>`;
+  el.topTitle.textContent = "Procedure Videos";
+  el.backBtn.hidden = false;
+  el.backBtn.onclick = () => { navBack(); };
 }
 
 function renderCategory(catId) {
   const cat = state.protocols.clinicalCategories.find((c) => c.id === catId);
   if (!cat) return renderHome();
-  el.app.innerHTML = `<h2 class="section-title">${escapeHtml(cat.title)}</h2><div class="card-list">${
+  el.app.innerHTML = `<h2 class="section-title">${escapeHtml(categoryLabel(cat))}</h2><div class="card-list">${
     cat.protocols.map((pr) => rowHTML(pr)).join("")
   }</div>`;
-  el.topTitle.textContent = cat.title;
+  el.topTitle.textContent = categoryLabel(cat);
   el.backBtn.hidden = false;
   el.backBtn.onclick = () => { navBack(); };
 }
@@ -298,16 +361,21 @@ function renderFavorites() {
   el.app.innerHTML = `<div class="card-list">${keys.map(favoriteRowHTML).join("")}</div>`;
 }
 
-function favoriteRowHTML(key) {
-  const [docId, pageStr] = key.split("#");
-  const page = Number(pageStr);
-  const { title } = contextForPage(docId, page);
+// A row for one page of a document: favorites and recents. `title` is what the
+// reader opened it as ("Epinephrine"); without it the page's protocol names it.
+function pageRowHTML(docId, page, title) {
+  title = title || contextForPage(docId, page).title;
   return `
     <button class="row-btn" data-doc="${escapeAttr(docId)}" data-page="${page}" data-title="${escapeAttr(title)}">
       <span class="row-title">${escapeHtml(title)}</span>
       ${page > 1 ? `<span class="search-result-page">p.${page}</span>` : ""}
-      <span class="row-chevron"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      ${CHEVRON_HTML}
     </button>`;
+}
+
+function favoriteRowHTML(key) {
+  const [docId, pageStr] = key.split("#");
+  return pageRowHTML(docId, Number(pageStr));
 }
 
 function renderAdmin() {
@@ -698,9 +766,16 @@ function navBack() {
 
 function applyNav(target, push = true) {
   if (push) navStack.push(target);
-  if (target.type === "category") {
-    renderCategory(target.catId);
-  }
+  if (target.type === "category") renderCategory(target.catId);
+  else if (target.type === "videos") renderVideos();
+}
+
+// Redraw whatever list sits behind a dialog that just closed: the category or
+// video list the reader came from, or the search results, or the tab.
+function rerenderCurrent() {
+  const top = navStack[navStack.length - 1];
+  if (top && !state.query.trim()) applyNav(top, false);
+  else render();
 }
 
 el.app.addEventListener("click", (e) => {
@@ -708,6 +783,11 @@ el.app.addEventListener("click", (e) => {
   if (suggestBtn) {
     el.searchInput.value = suggestBtn.dataset.suggest;
     el.searchInput.dispatchEvent(new Event("input"));
+    return;
+  }
+  if (e.target.closest("[data-nav='videos']")) {
+    applyNav({ type: "videos" });
+    announce(el.topTitle.textContent);
     return;
   }
   const navBtn = e.target.closest("[data-nav='category']");
@@ -760,8 +840,10 @@ el.clearSearch.addEventListener("click", () => {
 function selectorFor(node) {
   if (!node || node === document.body) return null;
   const d = node.dataset || {};
-  if (d.doc) return `.row-btn[data-doc="${CSS.escape(d.doc)}"][data-page="${CSS.escape(d.page)}"]`;
+  // Several rows can open the same page (every drug on a page), so the title tells them apart.
+  if (d.doc) return `.row-btn[data-doc="${CSS.escape(d.doc)}"][data-page="${CSS.escape(d.page)}"]${d.title ? `[data-title="${CSS.escape(d.title)}"]` : ""}`;
   if (d.video) return `[data-video="${CSS.escape(d.video)}"]`;
+  if (d.nav === "videos") return `[data-nav="videos"]`;
   if (d.nav) return `[data-cat="${CSS.escape(d.cat)}"]`;
   return node.id ? `#${CSS.escape(node.id)}` : null;
 }
@@ -893,6 +975,7 @@ async function openViewer(docId, page, title, trigger) {
   updateFavButton();
   updateDock();
   if (el.viewer.hidden) openDialog(el.viewer, el.viewerClose, trigger);
+  rememberRecent(docId, v.page, v.openTitle);
 
   try {
     const doc = await getPdfDoc(docId);
@@ -1027,10 +1110,10 @@ el.favBtn.addEventListener("click", () => {
 
 el.viewerClose.addEventListener("click", closeViewer);
 function closeViewer() {
+  const v = state.viewer;
+  rememberRecent(v.docId, v.page, v.page === v.openPage ? v.openTitle : contextForPage(v.docId, v.page).title);
   const back = closeDialog(el.viewer);
-  const top = navStack[navStack.length - 1];
-  if (top && top.type === "category") applyNav(top, false);
-  else render();
+  rerenderCurrent();
   restoreFocus(back);
 }
 
@@ -1201,7 +1284,7 @@ function closePlayer() {
   video.removeAttribute("src");
   video.load(); // stop any download in progress
   const back = closeDialog(el.player);
-  if (el.viewer.hidden) render();
+  if (el.viewer.hidden) rerenderCurrent();
   restoreFocus(back);
 }
 
