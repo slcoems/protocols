@@ -44,10 +44,10 @@
       "title": "Tourniquet",
       "summary": "When to use one, placing it above the wound, tightening, adding a second, and reassessment",
       "scope": "All providers",
-      "file": "videos/tourniquet-v8.mp4",
-      "poster": "videos/tourniquet-v8.jpg",
+      "file": "videos/tourniquet-v9.mp4",
+      "poster": "videos/tourniquet-v9.jpg",
       "durationSec": 118,
-      "bytes": 10799077,
+      "bytes": 10561137,
       "protocolId": "trauma-patient-care-guidelines-general-trauma-management",
       "pageText": ["place tourniquet", "commercial tourniquets", "via tourniquets"],
       "keywords": ["tourniquet", "TQ", "C-A-T", "CAT tourniquet", "windlass", "hemorrhage", "hemorrhage control", "severe bleeding", "stop the bleed", "amputation", "tourniquet conversion"]

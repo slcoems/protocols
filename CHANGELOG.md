@@ -32,3 +32,4 @@
 ## 2026-11-09
 
 - Added procedure video: Tourniquet (Home → Procedure Videos; linked from General Trauma Management and the hemorrhagic shock / traumatic arrest page). 3D bones: BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution-Share Alike 2.1 Japan; this video is shared under the same license
+- Updated procedure video: Tourniquet now shows the same tourniquet hardware in every shot (grey clip and grey time strap)
